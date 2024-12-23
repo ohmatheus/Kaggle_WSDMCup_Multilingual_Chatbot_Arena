@@ -169,3 +169,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+Data/Original/wsdm-cup-multilingual-chatbot-arena/sample_submission.csv
+Data/Original/wsdm-cup-multilingual-chatbot-arena/test.parquet
+Data/Original/wsdm-cup-multilingual-chatbot-arena/train.parquet
+Data/Preprocessed/train_preprocessed_MINI.csv
