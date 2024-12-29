@@ -275,7 +275,7 @@ class ChatbotArenaDataset(Dataset):
         self.data = dataframe
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.num_classes = 3
+        self.num_classes = 2
         self.test = test
 
     def __len__(self):
@@ -379,7 +379,7 @@ def add_similarity_features(df, embedder):
     df['similarity_diff'] = df['resp1_similarity'] - df['resp2_similarity']
     return df
 
-from keybert import KeyBERT
+#from keybert import KeyBERT
 
 # Use KeyBERT for keyword extraction
 #kw_model = KeyBERT()
@@ -400,12 +400,14 @@ def add_keyword_overlap_features(df, kw_model):
 
 
 #-------------------------------------------------------------------
-def extract_all_features(df, embedder, kw_model):
-    df = add_length_features(df)
-    df = add_lexical_features(df)
+def extract_all_features(df):
+    total_features = 0
+    #df = add_length_features(df)
+    #df = add_lexical_features(df)
     #df = add_sentiment_features(df)
-    df = add_similarity_features(df, embedder)
-    df = add_keyword_overlap_features(df, kw_model)
+    #df = add_similarity_features(df, embedder)
+    #df = add_keyword_overlap_features(df, kw_model)
     #df = add_formality_features(df)
     #df = add_ner_features(df)
-    return df
+    total_features += 1
+    return df, total_features
