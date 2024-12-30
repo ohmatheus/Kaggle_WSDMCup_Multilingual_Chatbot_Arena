@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
+from torch import Tensor
 
 from transformers import AutoModel, AutoTokenizer
 
@@ -42,32 +43,27 @@ def reencode(row):
 
 #-------------------------------------------------------------------
 # Tokenization function
-def tokenize_data(tokenizer, prompt, response1, response2, max_length=256):
-    tokens_resp1 = tokenizer(
-        prompt,
-        response1,  # Pair of responses
-        #[response1, response2],  # Pair of responses
-        padding="max_length",
-        truncation=True,
-        max_length=max_length,
-        return_tensors="pt"
-    )
-    
-    tokens_resp2 = tokenizer(
-        prompt,
-        response2,  # Pair of responses
-        #[response1, response2],  # Pair of responses
-        padding="max_length",
-        truncation=True,
-        max_length=max_length,
-        return_tensors="pt"
-    )
-    
+def tokenize(tokenizer, prompt, response_a, response_b, max_length=256, spread_max_length=False):
+    prompt = ["<prompt>: " + p for p in prompt]
+    response_a = ["\n\n<response_a>: " + r_a for r_a in response_a]
+    response_b = ["\n\n<response_b>: " + r_b for r_b in response_b]
+
+    if False:
+        prompt = tokenizer(prompt, max_length=max_length//3, return_tensors="pt", truncation=True,  padding="max_length").input_ids
+        response_a = tokenizer(response_a, max_length=max_length//3, return_tensors="pt", truncation=True, padding="max_length").input_ids
+        response_b = tokenizer(response_b, max_length=max_length//3, return_tensors="pt", truncation=True, padding="max_length").input_ids
+        input_ids = [p + r_a + r_b for p, r_a, r_b in zip(prompt, response_a, response_b)]
+        attention_mask = [[1]* len(i) for i in input_ids]
+    else:
+        text = [p + r_a + r_b for p, r_a, r_b in zip(prompt, response_a, response_b)]
+        tokenized = tokenizer(text, max_length=max_length, return_tensors="pt", padding="max_length", truncation=True) # padding=False
+        input_ids = tokenized.input_ids
+        attention_mask = tokenized.attention_mask
+
     return {
-        'input_ids_resp1': tokens_resp1['input_ids'],
-        'attention_mask_resp1': tokens_resp1['attention_mask'],
-        'input_ids_resp2': tokens_resp2['input_ids'],
-        'attention_mask_resp2': tokens_resp2['attention_mask']
+        'input_ids': input_ids,
+        'attention_mask': attention_mask,
+        #'token_len': [len(item) for item in input_ids],
     }
 
 
@@ -116,9 +112,18 @@ def predict(model, dataloader, device="cuda"):
     return predictions
 
 
+# #-------------------------------------------------------------------
+# def compute_metrics(eval_preds: EvalPrediction) -> dict:
+#     preds = eval_preds.predictions
+#     labels = eval_preds.label_ids
+#     probs = torch.from_numpy(preds).float().softmax(-1).numpy()
+#     loss = log_loss(y_true=labels, y_pred=probs)
+#     acc = accuracy_score(y_true=labels, y_pred=preds.argmax(-1))
+#     return {"acc": acc, "log_loss": loss}
+
 
 #-------------------------------------------------------------------
-# Evaluation (use for trainning)
+# Evaluation (used for trainning)
 def evaluate_model(model, dataloader, device="cuda"):
     model = model.to(device)
     model.eval()
@@ -132,23 +137,15 @@ def evaluate_model(model, dataloader, device="cuda"):
     #loss_fn = nn.BCELoss()
 
     with torch.no_grad():
-        for batch in dataloader:
-            # Move data to device
-            input_ids_resp1 = batch['input_ids_resp1'].to(device)
-            attention_mask_resp1 = batch['attention_mask_resp1'].to(device)
-            input_ids_resp2 = batch['input_ids_resp2'].to(device)
-            attention_mask_resp2 = batch['attention_mask_resp2'].to(device)
-            features = batch['features'].to(device)
-            labels = batch['label'].to(device)  # One-hot encoded labels
+        for batch in tqdm(dataloader, total=len(dataloader), unit='row'):
 
-            # Forward pass
             logits = model(
-                input_ids_resp1=input_ids_resp1,
-                attention_mask_resp1=attention_mask_resp1,
-                input_ids_resp2=input_ids_resp2,
-                attention_mask_resp2=attention_mask_resp2,
-                features=features
+                input_ids=batch['input_ids'].to(device),
+                attention_mask=batch['attention_mask'].to(device),
+                #features=batch['features'].to(device)
             )
+
+            labels = batch['label'].to(device)  # One-hot encoded labels
 
             # Compute loss
             loss = loss_fn(logits, labels)
@@ -173,7 +170,6 @@ def evaluate_model(model, dataloader, device="cuda"):
 
 
 #-------------------------------------------------------------------
-# Training loop
 def train_model(model, dataloader, valid_dataloader, optimizer, scheduler = None, num_epochs=5, device="cuda"):
     model = model.to(device)
     model.train()
@@ -187,17 +183,14 @@ def train_model(model, dataloader, valid_dataloader, optimizer, scheduler = None
             optimizer.zero_grad()
             
             logits = model(
-                input_ids_resp1=batch['input_ids_resp1'].to(device),
-                attention_mask_resp1=batch['attention_mask_resp1'].to(device),
-                input_ids_resp2=batch['input_ids_resp2'].to(device),
-                attention_mask_resp2=batch['attention_mask_resp2'].to(device),
-                features=batch['features'].to(device)
+                input_ids=batch['input_ids'].to(device),
+                attention_mask=batch['attention_mask'].to(device),
+                #features=batch['features'].to(device)
             )
             
             # One-hot labels
             labels = batch['label'].to(device)
         
-            #loss = nn.BCEWithLogitsLoss()(logits, labels)
             loss = nn.CrossEntropyLoss()(logits, labels)
         
             # Use BCELoss for one-hot encoded labels
@@ -212,57 +205,70 @@ def train_model(model, dataloader, valid_dataloader, optimizer, scheduler = None
         
         metrics = evaluate_model(model, valid_dataloader, device=device)
         
-        if min_val_loss > metrics['loss']:
-            torch.save({
-                        'epoch': epoch + 1,
-                        'model_state_dict': model.state_dict(),
-                        'optimizer_state_dict': optimizer.state_dict(),
-                        }, f'PreferencePredictionModel.pt')
-            print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint epoch: ", epoch + 1)
-            min_val_loss = metrics['loss']
-            
+        #if min_val_loss > metrics['loss']:
+        #    torch.save({
+        #                'epoch': epoch + 1,
+        #                'model_state_dict': model.state_dict(),
+        #                'optimizer_state_dict': optimizer.state_dict(),
+        #                }, f'PreferencePredictionModel.pt')
+        #    print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint epoch: ", epoch + 1)
+        #    min_val_loss = metrics['loss']
 
         print(f"Trainning Epoch {epoch + 1}, Accumulated Train Loss: {total_loss / len(dataloader)}")
         print(f"Eval : Valid Loss: {metrics['loss']}, Valid Accuracy : {metrics['accuracy']}")
-        for param_group in optimizer.param_groups:
-            print(f"Current learning rate: {param_group['lr']}")
-
+        #for param_group in optimizer.param_groups:
+        #    print(f"Current learning rate: {param_group['lr']}")
 
 
 #-------------------------------------------------------------------
+def last_token_pool(last_hidden_states: Tensor,
+                    attention_mask: Tensor) -> Tensor:
+    left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+    if left_padding:
+        return last_hidden_states[:, -1]
+    else:
+        sequence_lengths = attention_mask.sum(dim=1) - 1
+        batch_size = last_hidden_states.shape[0]
+        return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
+
+#-------------------------------------------------------------------
 class PreferencePredictionModel(nn.Module):
-    def __init__(self, transformer_name, feature_dim, num_classes=3):
+    def __init__(self, gemma_model, feature_dim, num_classes=2):
         super(PreferencePredictionModel, self).__init__()
         
         # Load transformer model
-        self.transformer = AutoModel.from_pretrained(transformer_name)
-        transformer_hidden_size = self.transformer.config.hidden_size  # e.g., 768 for XLM-RoBERTa
+        self.gemma_model = gemma_model #AutoModel.from_pretrained(transformer_name)
+        transformer_hidden_size = self.gemma_model.config.hidden_size
         
         # Fully connected layers for features
-        self.feature_fc = nn.Linear(feature_dim, 64)
+        #self.feature_fc = nn.Linear(feature_dim, 64)
         
         # Final classification layer
         self.classifier = nn.Sequential(
-            nn.Linear(2 * transformer_hidden_size + 64, 128),  # Combine response1, response2, and features
+            #nn.Linear(transformer_hidden_size + 64, 128),  # Combine response1, response2, and features
+            nn.Linear(transformer_hidden_size, 128),
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(128, num_classes)
         )
     
-    def forward(self, input_ids_resp1, attention_mask_resp1, input_ids_resp2, attention_mask_resp2, features):
+    def forward(self, input_ids, attention_mask, features=None):
         # Process response1
-        output_resp1 = self.transformer(input_ids=input_ids_resp1, attention_mask=attention_mask_resp1)
-        cls_embedding_resp1 = output_resp1.last_hidden_state[:, 0, :]  # CLS token
+        outputs = self.gemma_model(input_ids=input_ids, attention_mask=attention_mask)
+        #embedding = last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
+        embeddings = last_token_pool(outputs.last_hidden_state, attention_mask)
         
-        # Process response2
-        output_resp2 = self.transformer(input_ids=input_ids_resp2, attention_mask=attention_mask_resp2)
-        cls_embedding_resp2 = output_resp2.last_hidden_state[:, 0, :]  # CLS token
+        # normalize embeddings ????
+        #embeddings = F.normalize(embeddings, p=2, dim=1)
+        
+        #cls_embedding = output.last_hidden_state[:, 0, :]  # CLS token ?
         
         # Feature processing
-        feature_output = self.feature_fc(features)
+        #feature_output = self.feature_fc(features)
         
         # Concatenate and classify
-        combined = torch.cat((cls_embedding_resp1, cls_embedding_resp2, feature_output), dim=1)
+        #combined = torch.cat((cls_embedding_resp1, cls_embedding_resp2, feature_output), dim=1)
+        combined = embeddings
         logits = self.classifier(combined)
         
         return logits
@@ -285,43 +291,39 @@ class ChatbotArenaDataset(Dataset):
         row = self.data.iloc[idx]
 
         # Tokenize the text
-        tokens = tokenize_data(self.tokenizer, row['prompt'], row['response_a'], row['response_b'], self.max_length)
+        tokens = tokenize(self.tokenizer, [row['prompt']], [row['response_a']], [row['response_b']], max_length=self.max_length)
         
-        # Extract engineered features
-        features = torch.tensor([
-            #row['resp1_length'],
-            #row['resp2_length'],
-            row['length_diff'],
-            #row['resp1_lexical_div'],
-            #row['resp2_lexical_div'],
-            row['lexical_div_diff'],
-            #row['resp1_similarity'],
-            #row['resp2_similarity'],
-            row['similarity_diff'],
-            #row['resp1_keyword_overlap'],
-            #row['resp2_keyword_overlap'],
-            row['keyword_overlap_diff'],
-        ], dtype=torch.float)
+        # Extract features
+        #features = torch.tensor([
+        #    #row['resp1_length'],
+        #    #row['resp2_length'],
+        #    row['length_diff'],
+        #    #row['resp1_lexical_div'],
+        #    #row['resp2_lexical_div'],
+        #    row['lexical_div_diff'],
+        #    #row['resp1_similarity'],
+        #    #row['resp2_similarity'],
+        #    row['similarity_diff'],
+        #    #row['resp1_keyword_overlap'],
+        #    #row['resp2_keyword_overlap'],
+        #    row['keyword_overlap_diff'],
+        #], dtype=torch.float)
 
         if not self.test:
             # Label
             label = torch.nn.functional.one_hot(torch.tensor(row['class_label']), num_classes=self.num_classes).float()
 
             return {
-                'input_ids_resp1': tokens['input_ids_resp1'].squeeze(0),
-                'attention_mask_resp1': tokens['attention_mask_resp1'].squeeze(0),
-                'input_ids_resp2': tokens['input_ids_resp2'].squeeze(0),
-                'attention_mask_resp2': tokens['attention_mask_resp2'].squeeze(0),
-                'features': features,
+                'input_ids': tokens['input_ids'].squeeze(0),
+                'attention_mask': tokens['attention_mask'].squeeze(0),
+                #'features': features,
                 'label': label
             }
         else:
             return {
-                'input_ids_resp1': tokens['input_ids_resp1'].squeeze(0),
-                'attention_mask_resp1': tokens['attention_mask_resp1'].squeeze(0),
-                'input_ids_resp2': tokens['input_ids_resp2'].squeeze(0),
-                'attention_mask_resp2': tokens['attention_mask_resp2'].squeeze(0),
-                'features': features
+                'input_ids': tokens['input_ids_resp1'].squeeze(0),
+                'attention_mask': tokens['attention_mask'].squeeze(0),
+                #'features': features
             }
 
 
