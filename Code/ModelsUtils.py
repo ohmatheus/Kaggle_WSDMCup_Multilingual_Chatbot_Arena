@@ -7,7 +7,8 @@ from transformers import AutoModel, AutoTokenizer
 
 from tqdm import tqdm
 
-from sklearn.metrics.pairwise import cosine_similarity
+from peft import PeftModel
+
 
 #-------------------------------------------------------------------
 label2name = {0: 'model_a', 1: 'model_b'}
@@ -238,7 +239,7 @@ class PreferencePredictionModel(nn.Module):
         
         # Load transformer model
         self.gemma_model = gemma_model #AutoModel.from_pretrained(transformer_name)
-        transformer_hidden_size = self.gemma_model.config.hidden_size
+        transformer_hidden_size = gemma_model.config.hidden_size
         
         # Fully connected layers for features
         #self.feature_fc = nn.Linear(feature_dim, 64)
@@ -253,7 +254,6 @@ class PreferencePredictionModel(nn.Module):
         )
     
     def forward(self, input_ids, attention_mask, features=None):
-        # Process response1
         outputs = self.gemma_model(input_ids=input_ids, attention_mask=attention_mask)
         #embedding = last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
         embeddings = last_token_pool(outputs.last_hidden_state, attention_mask)
@@ -273,6 +273,41 @@ class PreferencePredictionModel(nn.Module):
         
         return logits
 
+#-------------------------------------------------------------------
+def custom_save_model_chkpt(model, checkpointName, optimizer=None):
+    # peft model
+    model.gemma_model.save_pretrained(f'../Checkpoints/{checkpointName}/PEFT-bge-multilingual-gemma2', save_adapters=True, save_embedding_layers=True)
+    
+    # features and classifier
+    torch.save({
+        'epoch': 0,
+        #'optimizer_state_dict': optimizer.state_dict(),
+        #'feature_fc_state_dict', predictionModel_original.fc.state_dict()
+        'classifier_state_dict': model.classifier.state_dict(),
+        }, f'../Checkpoints/{checkpointName}/PreferencePredictionModel.pt')
+
+#-------------------------------------------------------------------
+def custom_load_model_chkpt(baseModelPath, checkpointName, quantization_config=None, optimizer=None):
+    # load base
+    baseModel = AutoModel.from_pretrained(
+            baseModelPath,
+            quantization_config=quantization_config
+            )
+
+    # load peft from base
+    loraModel_load = PeftModel.from_pretrained(
+            baseModel, 
+            f'../Checkpoints/{checkpointName}/PEFT-bge-multilingual-gemma2',
+            is_trainable=True
+            )
+    
+    predictionModelLoaded = PreferencePredictionModel(loraModel_load, feature_dim=4, num_classes=2)
+    
+    checkpoint = torch.load(f'../Checkpoints/{checkpointName}/PreferencePredictionModel.pt')
+    
+    predictionModelLoaded.classifier.load_state_dict(checkpoint['classifier_state_dict'])
+    
+    return predictionModelLoaded
 
 
 #-------------------------------------------------------------------
