@@ -7,7 +7,7 @@ from transformers import AutoModel, AutoTokenizer
 
 from tqdm import tqdm
 
-from peft import PeftModel
+from peft import PeftModel, prepare_model_for_kbit_training
 
 
 #-------------------------------------------------------------------
@@ -291,12 +291,16 @@ def custom_load_model_chkpt(baseModelPath, checkpointName, quantization_config=N
     # load base
     baseModel = AutoModel.from_pretrained(
             baseModelPath,
+            torch_dtype=torch.float16,
             quantization_config=quantization_config
             )
 
+    baseModel = prepare_model_for_kbit_training(baseModel)
+    
     # load peft from base
     loraModel_load = PeftModel.from_pretrained(
-            baseModel, 
+            baseModel,
+            #torch_dtype=torch.float16,
             f'../Checkpoints/{checkpointName}/PEFT-bge-multilingual-gemma2',
             is_trainable=True
             )
