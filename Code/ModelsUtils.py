@@ -171,7 +171,7 @@ def evaluate_model(model, dataloader, device="cuda"):
 
 
 #-------------------------------------------------------------------
-def train_model(model, dataloader, valid_dataloader, optimizer, scheduler = None, num_epochs=5, device="cuda"):
+def train_model(model, dataloader, valid_dataloader, optimizer, scheduler = None, num_epochs=5, savePath="./checkpoints", device="cuda"):
     model = model.to(device)
     model.train()
     min_val_loss = float('inf') #checkpoint
@@ -206,14 +206,10 @@ def train_model(model, dataloader, valid_dataloader, optimizer, scheduler = None
         
         metrics = evaluate_model(model, valid_dataloader, device=device)
         
-        #if min_val_loss > metrics['loss']:
-        #    torch.save({
-        #                'epoch': epoch + 1,
-        #                'model_state_dict': model.state_dict(),
-        #                'optimizer_state_dict': optimizer.state_dict(),
-        #                }, f'PreferencePredictionModel.pt')
-        #    print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint epoch: ", epoch + 1)
-        #    min_val_loss = metrics['loss']
+        if min_val_loss > metrics['loss']:
+            print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint epoch: ", epoch + 1)
+            custom_save_model_chkpt(model, savePath, 'checkpoint')
+            min_val_loss = metrics['loss']
 
         print(f"Trainning Epoch {epoch + 1}, Accumulated Train Loss: {total_loss / len(dataloader)}")
         print(f"Eval : Valid Loss: {metrics['loss']}, Valid Accuracy : {metrics['accuracy']}")
@@ -274,9 +270,12 @@ class PreferencePredictionModel(nn.Module):
         return logits
 
 #-------------------------------------------------------------------
-def custom_save_model_chkpt(model, checkpointName, optimizer=None):
+def custom_save_model_chkpt(model, savePath, checkpointName, optimizer=None):
     # peft model
-    model.gemma_model.save_pretrained(f'../Checkpoints/{checkpointName}/PEFT-bge-multilingual-gemma2', save_adapters=True, save_embedding_layers=True)
+    
+    savePath = savePath + checkpointName
+
+    model.gemma_model.save_pretrained(f'{savePath}/PEFT-bge-multilingual-gemma2', save_adapters=True, save_embedding_layers=True)
     
     # features and classifier
     torch.save({
@@ -284,30 +283,38 @@ def custom_save_model_chkpt(model, checkpointName, optimizer=None):
         #'optimizer_state_dict': optimizer.state_dict(),
         #'feature_fc_state_dict', predictionModel_original.fc.state_dict()
         'classifier_state_dict': model.classifier.state_dict(),
-        }, f'../Checkpoints/{checkpointName}/PreferencePredictionModel.pt')
+        }, f'{savePath}/PreferencePredictionModel.pt')
 
 #-------------------------------------------------------------------
-def custom_load_model_chkpt(baseModelPath, checkpointName, quantization_config=None, optimizer=None):
+def custom_load_model_chkpt(baseModelPath, peftModelPath, checkpointName, quantization_config=None, optimizer=None):
     # load base
-    baseModel = AutoModel.from_pretrained(
-            baseModelPath,
-            torch_dtype=torch.float16,
-            quantization_config=quantization_config
-            )
+    if quantization_config:
+        baseModel = AutoModel.from_pretrained(
+                baseModelPath,
+                torch_dtype=torch.float16,
+                quantization_config=quantization_config
+                )
+    else:
+        baseModel = AutoModel.from_pretrained(
+                baseModelPath,
+                torch_dtype=torch.float16
+                )
 
     baseModel = prepare_model_for_kbit_training(baseModel)
+    
+    loadPath = peftModelPath + checkpointName
     
     # load peft from base
     loraModel_load = PeftModel.from_pretrained(
             baseModel,
             #torch_dtype=torch.float16,
-            f'../Checkpoints/{checkpointName}/PEFT-bge-multilingual-gemma2',
+            f'{loadPath}/PEFT-bge-multilingual-gemma2',
             is_trainable=True
             )
     
     predictionModelLoaded = PreferencePredictionModel(loraModel_load, feature_dim=4, num_classes=2)
     
-    checkpoint = torch.load(f'../Checkpoints/{checkpointName}/PreferencePredictionModel.pt')
+    checkpoint = torch.load(f'{loadPath}/PreferencePredictionModel.pt')
     
     predictionModelLoaded.classifier.load_state_dict(checkpoint['classifier_state_dict'])
     
