@@ -3,11 +3,13 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
 
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
 
 from tqdm import tqdm
 
 from peft import PeftModel, prepare_model_for_kbit_training
+
+import Configurations as Configs
 
 
 #-------------------------------------------------------------------
@@ -171,12 +173,12 @@ def evaluate_model(model, dataloader, device="cuda"):
 
 
 #-------------------------------------------------------------------
-def train_model(model, dataloader, valid_dataloader, optimizer, scheduler = None, num_epochs=5, savePath="./checkpoints", device="cuda"):
+def train_model(model, dataloader, valid_dataloader, optimizer, config, scheduler=None,  device="cuda"):
     model = model.to(device)
     model.train()
     min_val_loss = float('inf') #checkpoint
 
-    for epoch in range(num_epochs):
+    for epoch in range(config.n_epochs):
         total_loss = 0
         model.train()
         
@@ -206,12 +208,14 @@ def train_model(model, dataloader, valid_dataloader, optimizer, scheduler = None
         
         metrics = evaluate_model(model, valid_dataloader, device=device)
         
+        # add date and hour + epochs in checkpoint_name
+        
         if min_val_loss > metrics['loss']:
             print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint epoch: ", epoch + 1)
-            custom_save_model_chkpt(model, savePath, 'checkpoint')
+            custom_save_model_chkpt(model, config, checkpointName="train", epoch=epoch+1)
             min_val_loss = metrics['loss']
 
-        print(f"Trainning Epoch {epoch + 1}, Accumulated Train Loss: {total_loss / len(dataloader)}")
+        print(f"Epoch {epoch + 1} Finished, Accumulated Train Loss: {total_loss / len(dataloader)}")
         print(f"Eval : Valid Loss: {metrics['loss']}, Valid Accuracy : {metrics['accuracy']}")
         #for param_group in optimizer.param_groups:
         #    print(f"Current learning rate: {param_group['lr']}")
@@ -270,51 +274,63 @@ class PreferencePredictionModel(nn.Module):
         return logits
 
 #-------------------------------------------------------------------
-def custom_save_model_chkpt(model, savePath, checkpointName, optimizer=None):
+def custom_save_model_chkpt(model, config, checkpointName, epoch=0, optimizer=None):
     # peft model
     
-    savePath = savePath + checkpointName
+    savePath = config.checkpoints_path + '/' + config.config_name + '/' + checkpointName
 
-    model.gemma_model.save_pretrained(f'{savePath}/PEFT-bge-multilingual-gemma2', save_adapters=True, save_embedding_layers=True)
+    model.gemma_model.save_pretrained(f'{savePath}/PEFT', save_adapters=True, save_embedding_layers=True)
     
     # features and classifier
     torch.save({
-        'epoch': 0,
+        'epoch': epoch,
         #'optimizer_state_dict': optimizer.state_dict(),
         #'feature_fc_state_dict', predictionModel_original.fc.state_dict()
         'classifier_state_dict': model.classifier.state_dict(),
         }, f'{savePath}/PreferencePredictionModel.pt')
 
 #-------------------------------------------------------------------
-def custom_load_model_chkpt(baseModelPath, peftModelPath, checkpointName, quantization_config=None, optimizer=None):
+def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu", is_trainable=True, optimizer=None):
     # load base
-    if quantization_config:
-        baseModel = AutoModel.from_pretrained(
-                baseModelPath,
-                torch_dtype=torch.float16,
-                quantization_config=quantization_config
+    quantization_config = None
+    if config.quantize=='4bit':
+        quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,  # bfloat16 is recommended
+                bnb_4bit_use_double_quant=False,
+                bnb_4bit_quant_type='nf4',
                 )
-    else:
-        baseModel = AutoModel.from_pretrained(
-                baseModelPath,
-                torch_dtype=torch.float16
-                )
+    
+    baseModel = AutoModel.from_pretrained(
+            config.basemodel_path,
+            torch_dtype='auto', # we already choose that first time we downloaded model from hugginface
+            device_map=device,
+            quantization_config=quantization_config
+            )
 
     baseModel = prepare_model_for_kbit_training(baseModel)
+
+    peftModelPath = ""
+    if loadFrom:
+        peftModelPath=f"{loadFrom.checkpoints_path}/{loadFrom.config_name}/"
+    else:
+        peftModelPath=f"{config.checkpoints_path}/{config.config_name}/"
     
     loadPath = peftModelPath + checkpointName
     
     # load peft from base
     loraModel_load = PeftModel.from_pretrained(
             baseModel,
-            #torch_dtype=torch.float16,
-            f'{loadPath}/PEFT-bge-multilingual-gemma2',
-            is_trainable=True
+            f'{loadPath}/PEFT',
+            is_trainable=is_trainable)
+    
+    predictionModelLoaded = PreferencePredictionModel(
+            loraModel_load,
+            feature_dim=config.feature_dims,
+            num_classes=config.num_classes
             )
     
-    predictionModelLoaded = PreferencePredictionModel(loraModel_load, feature_dim=4, num_classes=2)
-    
-    checkpoint = torch.load(f'{loadPath}/PreferencePredictionModel.pt')
+    checkpoint = torch.load(f'{loadPath}/PreferencePredictionModel.pt', weights_only=True)
     
     predictionModelLoaded.classifier.load_state_dict(checkpoint['classifier_state_dict'])
     
