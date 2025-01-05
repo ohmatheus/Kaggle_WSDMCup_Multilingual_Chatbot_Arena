@@ -201,3 +201,6 @@ Code/modeltest
 Code/modeltest.pt
 Data/Preprocessed/train_preprocessed_FULL_original.csv
 Data/Preprocessed/train_preprocessed_MINI_original.csv
+Checkpoints/
+BaseModel/
+Data/
