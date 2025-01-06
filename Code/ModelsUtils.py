@@ -11,6 +11,10 @@ from peft import PeftModel, prepare_model_for_kbit_training
 
 import Configurations as Configs
 
+from datetime import datetime
+import matplotlib.pyplot as plt
+import pickle
+
 
 #-------------------------------------------------------------------
 label2name = {0: 'model_a', 1: 'model_b'}
@@ -68,6 +72,52 @@ def tokenize(tokenizer, prompt, response_a, response_b, max_length=256, spread_m
         'attention_mask': attention_mask,
         #'token_len': [len(item) for item in input_ids],
     }
+
+
+
+#-------------------------------------------------------------------
+def save_history(history, config, checkpointName):
+    savePath = config.checkpoints_path + '/' + config.config_name + '/' + checkpointName + '/'
+    with open(savePath+'history.pkl', 'wb') as fp:
+        pickle.dump(history, fp)
+        print('dictionary saved successfully to file')
+
+
+#-------------------------------------------------------------------
+def laod_history(config, checkpointName):
+    savePath = config.checkpoints_path + '/' + config.config_name + '/' + checkpointName
+    with open(savePath+'history.pkl', 'rb') as fp:
+        history = pickle.load(fp)
+        return history
+
+
+#-------------------------------------------------------------------
+def plot_model_history(history, title):
+    loss = history['train_accum_loss']
+    val_loss = history['valid_loss']
+    acc = history['train_accum_accuracy']
+    val_acc = history['valid_accuracy']
+    
+    # show best epoch with a red line ?
+
+    epochs = range(1, len(loss) + 1)
+
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(20, 5))
+    
+    fig.suptitle(title)
+    
+    ax[0].set(title='Loss')
+    ax[0].plot(epochs, loss, label='Training')
+    ax[0].plot(epochs, val_loss, label='Validation')
+    ax[0].legend(loc="upper right")
+    
+    ax[1].set(title='accuracy')
+    ax[1].plot(epochs, acc, label='Training')
+    ax[1].plot(epochs, val_acc, label='Validation')
+    ax[1].legend(loc="lower right")
+    
+    plt.close(fig)
+    return fig
 
 
 
@@ -177,10 +227,21 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
     model = model.to(device)
     model.train()
     min_val_loss = float('inf') #checkpoint
+    history = {"train_accum_loss" : [], "train_accum_accuracy" : [], "valid_loss" : [], 
+                "valid_accuracy" : []}
+    history["best_epoch"]=0
+    history["best_loss"]=0
+    history["best_acc"]=0
+
+    now = datetime.now()
+    date_time = now.strftime("%m-%d-%Y_%H-%M")
+    checkpoint_prefix = date_time+'_'+str(config.max_length)+'_'
 
     for epoch in range(config.n_epochs):
         total_loss = 0
         model.train()
+        correct = 0
+        total_samples = 0
         
         for batch in tqdm(dataloader, total=len(dataloader), unit='row'):
             optimizer.zero_grad()
@@ -205,20 +266,46 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
             
             total_loss += loss.item()
             
-        
-        metrics = evaluate_model(model, valid_dataloader, device=device)
+            # Compute predictions and accuracy
+            predictions = torch.argmax(logits, dim=1)  # Class with highest score
+            true_labels = torch.argmax(labels, dim=1)  # Convert one-hot to class indices
+            
+            correct += (predictions == true_labels).sum().item()
+            total_samples += labels.size(0)
         
         # add date and hour + epochs in checkpoint_name
+        # Calculate average loss and accuracy
+        avg_loss = total_loss / len(dataloader)
+        accuracy = correct / total_samples
+
+        metrics = evaluate_model(model, valid_dataloader, device=device)
+        
+        print(f"Epoch {epoch + 1} Finished")
+        print(f"Accumulated Train Loss: {avg_loss}")
+        print(f"Accumulated Train Accuracy: {accuracy}")
+        print(f"Eval : Valid Loss: {metrics['loss']}, Valid Accuracy : {metrics['accuracy']}")
+        
+        history['train_accum_loss'].append(avg_loss)
+        history['train_accum_accuracy'].append(accuracy)
+        history['valid_loss'].append(metrics['loss'])
+        history['valid_accuracy'].append(metrics['accuracy'])
+        
+        chkptName = checkpoint_prefix + 'train'
         
         if min_val_loss > metrics['loss']:
-            print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint epoch: ", epoch + 1)
-            custom_save_model_chkpt(model, config, checkpointName="train", epoch=epoch+1)
+            print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint, epoch: ", epoch + 1)
+            custom_save_model_chkpt(model, config, checkpointName=chkptName, epoch=epoch+1)
+            history["best_epoch"] = epoch + 1
+            history["best_loss"] = metrics['loss']
+            history["best_acc"] = metrics['accuracy']
+            
             min_val_loss = metrics['loss']
 
-        print(f"Epoch {epoch + 1} Finished, Accumulated Train Loss: {total_loss / len(dataloader)}")
-        print(f"Eval : Valid Loss: {metrics['loss']}, Valid Accuracy : {metrics['accuracy']}")
+        save_history(history, config, chkptName)
+        print(f"-----------------------------------------------------------------")
         #for param_group in optimizer.param_groups:
         #    print(f"Current learning rate: {param_group['lr']}")
+    return history
 
 
 #-------------------------------------------------------------------

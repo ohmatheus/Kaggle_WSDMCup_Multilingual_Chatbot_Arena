@@ -31,7 +31,7 @@ lora_r = 16
 lora_alpha = 32
 lora_dropout = 0.05
 lora_bias = 'none'
-spread_max_length = False
+spread_max_length = True # tokenizer will equally truncate and pad all 3 texts inputs (prompt, A, B)
 
 #--------------------------------------------------------------------------
 [save_load_gemma2_2b_fp16]
@@ -53,7 +53,7 @@ train_batch = 2
 eval_batch = 2
 n_epochs = 2
 sample_size = 0.005
-max_length = 2048
+max_length = 256
 spread_max_length = True
 
 #--------------------------------------------------------------------------
