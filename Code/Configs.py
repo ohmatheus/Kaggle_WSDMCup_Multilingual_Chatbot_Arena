@@ -71,3 +71,17 @@ sample_size = 0.5
 # Full trainning
 [full]
 n_epoch = 8
+
+#--------------------------------------------------------------------------
+[runpod_1]
+config_name = 'runpod_1'
+transformers_basemodel_path = 'unsloth/gemma-2-2b'
+basemodel_path = '../BaseModel/gemma2_2b_unsloth_fp16'
+quantize = '4bit'
+fp16 = True
+train_batch = 2
+eval_batch = 2
+n_epochs = 5
+sample_size = 1
+max_length = 2048
+spread_max_length = True
