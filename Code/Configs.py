@@ -25,7 +25,7 @@ basemodel_path = '../BaseModel/gemma2_2b_unsloth' # loading from file and not fr
 quantize = '4bit'
 fp16 = True
 feature_dims = 4
-num_classes = 2
+num_classes = 1
 hidden_dim=128
 #--- lora part ----
 lora_r = 16
@@ -64,6 +64,23 @@ train_batch = 2
 eval_batch = 2
 n_epochs = 5
 sample_size = 0.01
+max_length=256
+spread_max_length = False
+hidden_dim=512
+
+#--------------------------------------------------------------------------
+# Just to make sure everything run smoothly - ultra speed test config
+[micro_test]
+train_data = '../Data/Preprocessed/train_preprocessed_FULL_EN.csv'
+config_name = 'micro_gemma2_2b_fp16'
+transformers_basemodel_path = 'unsloth/gemma-2-2b'
+basemodel_path = '../BaseModel/gemma2_2b_unsloth_fp16'
+quantize = '4bit'
+fp16 = True
+train_batch = 2
+eval_batch = 2
+n_epochs = 5
+sample_size = 0.1
 max_length=256
 spread_max_length = False
 hidden_dim=512

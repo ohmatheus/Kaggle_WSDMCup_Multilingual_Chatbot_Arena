@@ -184,7 +184,7 @@ def evaluate_model(model, dataloader, device="cuda"):
     total_samples = 0
 
     # Use BCEWithLogitsLoss for one-hot encoded labels
-    loss_fn = nn.CrossEntropyLoss()
+    loss_fn = nn.BCELoss()
     #loss_fn = nn.BCEWithLogitsLoss()
     #loss_fn = nn.BCELoss()
 
@@ -204,8 +204,9 @@ def evaluate_model(model, dataloader, device="cuda"):
             total_loss += loss.item()
 
             # Compute predictions and accuracy
-            predictions = torch.argmax(logits, dim=1)  # Class with highest score
-            true_labels = torch.argmax(labels, dim=1)  # Convert one-hot to class indices
+            normLogits = (logits>0.5).float()
+            predictions = normLogits    #torch.argmax(logits, dim=1)  # Class with highest score
+            true_labels = labels        #torch.argmax(labels, dim=1)  # Convert one-hot to class indices
             
             correct += (predictions == true_labels).sum().item()
             total_samples += labels.size(0)
@@ -254,10 +255,10 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
             # One-hot labels
             labels = batch['label'].to(device)
         
-            loss = nn.CrossEntropyLoss()(logits, labels)
+            loss = nn.BCELoss()(logits, labels)
         
             # Use BCELoss for one-hot encoded labels
-            #loss = nn.BCELoss()(logits, labels) #more stable, It combines a sigmoid activation and binary cross-entropy loss.
+            #loss = nn.BCELoss()(logits, labels)
             loss.backward()
             optimizer.step()
             if scheduler is not None:
@@ -266,8 +267,9 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
             total_loss += loss.item()
             
             # Compute predictions and accuracy
-            predictions = torch.argmax(logits, dim=1)  # Class with highest score
-            true_labels = torch.argmax(labels, dim=1)  # Convert one-hot to class indices
+            normLogits = (logits>0.5).float()
+            predictions = normLogits    #torch.argmax(logits, dim=1)  # Class with highest score
+            true_labels = labels        #torch.argmax(labels, dim=1)  # Convert one-hot to class indices
             
             correct += (predictions == true_labels).sum().item()
             total_samples += labels.size(0)
@@ -336,7 +338,8 @@ class PreferencePredictionModel(nn.Module):
             nn.Linear(transformer_hidden_size, hidden_dim),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(hidden_dim, num_classes)
+            nn.Linear(hidden_dim, num_classes),
+            nn.Sigmoid()
         )
     
     def forward(self, input_ids, attention_mask, features=None):
@@ -460,7 +463,9 @@ class ChatbotArenaDataset(Dataset):
 
         if not self.test:
             # Label
-            label = torch.nn.functional.one_hot(torch.tensor(row['class_label']), num_classes=self.num_classes).float()
+            #label = torch.nn.functional.one_hot(torch.tensor(row['class_label']), num_classes=self.num_classes).float()
+            #label = torch.nn.functional.one_hot(torch.tensor(row['class_label']), num_classes=1).float()
+            label = torch.tensor([row['class_label']]).float()
 
             return {
                 'input_ids': tokens['input_ids'].squeeze(0),
