@@ -80,7 +80,6 @@ def save_history(history, config, checkpointName):
     savePath = config.checkpoints_path + '/' + config.config_name + '/' + checkpointName + '/'
     with open(savePath+'history.pkl', 'wb') as fp:
         pickle.dump(history, fp)
-        print('dictionary saved successfully to file')
 
 
 #-------------------------------------------------------------------
@@ -283,7 +282,7 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
         print(f"Epoch {epoch + 1} Finished")
         print(f"Accumulated Train Loss: {avg_loss}")
         print(f"Accumulated Train Accuracy: {accuracy}")
-        print(f"Eval : Valid Loss: {metrics['loss']}, Valid Accuracy : {metrics['accuracy']}")
+        print(f"Valid Loss: {metrics['loss']}, Valid Accuracy : {metrics['accuracy']}")
         
         history['train_accum_loss'].append(avg_loss)
         history['train_accum_accuracy'].append(accuracy)
@@ -321,7 +320,7 @@ def last_token_pool(last_hidden_states: Tensor,
 
 #-------------------------------------------------------------------
 class PreferencePredictionModel(nn.Module):
-    def __init__(self, gemma_model, feature_dim, num_classes=2):
+    def __init__(self, gemma_model, feature_dim, hidden_dim=128, num_classes=2):
         super(PreferencePredictionModel, self).__init__()
         
         # Load transformer model
@@ -334,10 +333,10 @@ class PreferencePredictionModel(nn.Module):
         # Final classification layer
         self.classifier = nn.Sequential(
             #nn.Linear(transformer_hidden_size + 64, 128),  # Combine response1, response2, and features
-            nn.Linear(transformer_hidden_size, 128),
+            nn.Linear(transformer_hidden_size, hidden_dim),
             nn.ReLU(),
             nn.Dropout(0.2),
-            nn.Linear(128, num_classes)
+            nn.Linear(hidden_dim, num_classes)
         )
     
     def forward(self, input_ids, attention_mask, features=None):
@@ -414,7 +413,8 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
     predictionModelLoaded = PreferencePredictionModel(
             loraModel_load,
             feature_dim=config.feature_dims,
-            num_classes=config.num_classes
+            num_classes=config.num_classes,
+            hidden_dim=config.hidden_dim
             )
     
     checkpoint = torch.load(f'{loadPath}/PreferencePredictionModel.pt', weights_only=True)
