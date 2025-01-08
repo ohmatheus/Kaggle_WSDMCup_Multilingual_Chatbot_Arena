@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
+import torch.nn.functional as F
 
 from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
 
@@ -55,7 +56,7 @@ def tokenize(tokenizer, prompt, response_a, response_b, max_length=256, spread_m
     response_a = ["\n\n<response_a>: " + r_a for r_a in response_a]
     response_b = ["\n\n<response_b>: " + r_b for r_b in response_b]
 
-    if False:
+    if spread_max_length:
         prompt = tokenizer(prompt, max_length=max_length//3, return_tensors="pt", truncation=True,  padding="max_length").input_ids
         response_a = tokenizer(response_a, max_length=max_length//3, return_tensors="pt", truncation=True, padding="max_length").input_ids
         response_b = tokenizer(response_b, max_length=max_length//3, return_tensors="pt", truncation=True, padding="max_length").input_ids
@@ -343,12 +344,13 @@ class PreferencePredictionModel(nn.Module):
         )
     
     def forward(self, input_ids, attention_mask, features=None):
-        outputs = self.gemma_model(input_ids=input_ids, attention_mask=attention_mask)
+        outputs = self.gemma_model(input_ids=input_ids, attention_mask=attention_mask) #, output_hidden_states=True
         #embedding = last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
         embeddings = last_token_pool(outputs.last_hidden_state, attention_mask)
+        #.hidden_states[-1][0, -1, :]
         
         # normalize embeddings ????
-        #embeddings = F.normalize(embeddings, p=2, dim=1)
+        embeddings = F.normalize(embeddings, p=2, dim=1)
         
         #cls_embedding = output.last_hidden_state[:, 0, :]  # CLS token ?
         
