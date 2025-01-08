@@ -6,4 +6,3 @@ pandas
 numpy
 scikit-learn
 matplotlib
-ipylab

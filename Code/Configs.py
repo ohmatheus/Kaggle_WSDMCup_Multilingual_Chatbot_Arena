@@ -43,13 +43,31 @@ quantize = None
 fp16 = True
 
 #--------------------------------------------------------------------------
-[save_load_gemma2_2b_fp16_hidden_512]
-config_name = 'save_load_gemma2_2b_fp16_hidden_512'
+[prepare_gemma2_2b_fp16_hidden_4096]
+config_name = 'save_load_gemma2_2b_fp16_hidden_4096'
 transformers_basemodel_path = 'unsloth/gemma-2-2b'
 basemodel_path = '../BaseModel/gemma2_2b_unsloth_fp16'
 quantize = None
 fp16 = True
-hidden_dim=512
+hidden_dim=4096
+
+#--------------------------------------------------------------------------
+[prepare_gemma2_9b_fp16_h4096]
+config_name = 'prepare_gemma2_9b_fp16_h4096'
+transformers_basemodel_path = 'unsloth/gemma-2-9b-it'
+basemodel_path = '../BaseModel/gemma2_9b_unsloth_fp16'
+quantize = None
+fp16 = True
+hidden_dim=4096
+
+#--------------------------------------------------------------------------
+[prepare_gemma2_9b_fp16_4bit_h4096]
+config_name = 'prepare_gemma2_9b_fp16_4bit_h4096'
+transformers_basemodel_path = 'unsloth/gemma-2-9b-it'
+basemodel_path = '../BaseModel/gemma2_9b_unsloth_fp16'
+quantize = '4bit'
+fp16 = True
+hidden_dim=4096
 
 #--------------------------------------------------------------------------
 # Just to make sure everything run smoothly - ultra speed test config
@@ -86,23 +104,6 @@ spread_max_length = False
 hidden_dim=512
 
 #--------------------------------------------------------------------------
-# Testing robustness, memory, etc
-[mini] 
-sample_size = 0.01
-max_length = 2048
-
-#--------------------------------------------------------------------------
-# Half the size for hyperparameters testing
-[medium]
-sample_size = 0.5
-
-#--------------------------------------------------------------------------
-# Full trainning
-[full]
-n_epoch = 8
-
-#--------------------------------------------------------------------------
-#RTX 4090
 [runpod_1]
 train_data = '../Data/Preprocessed/train_preprocessed_FULL_EN.csv'
 config_name = 'runpod_1'
@@ -112,8 +113,24 @@ quantize='4bit'
 fp16=True
 train_batch=4
 eval_batch=4
-n_epochs = 1
+n_epochs = 3
 sample_size = 0.5
 max_length = 2048
 spread_max_length = False
-hidden_dim=512
+hidden_dim=4096
+
+#--------------------------------------------------------------------------
+[runpod_2]
+train_data = '../Data/Preprocessed/train_preprocessed_FULL_EN.csv'
+config_name = 'runpod_2'
+transformers_basemodel_path = 'unsloth/gemma-2-9b-it'
+basemodel_path = '../BaseModel/gemma2_9b_unsloth_fp16_4bit'
+quantize='4bit'
+fp16=True
+train_batch=4
+eval_batch=4
+n_epochs = 3
+sample_size = 0.25
+max_length = 2048
+spread_max_length = False
+hidden_dim=4096
