@@ -394,7 +394,8 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
     
     baseModel = AutoModel.from_pretrained(
             config.basemodel_path,
-            torch_dtype='auto', # we already choose that first time we downloaded model from hugginface
+            torch_dtype=torch.float16 if config.fp16 else "auto",
+            #torch_dtype='auto', # we already choose that first time we downloaded model from hugginface
             device_map=device,
             quantization_config=quantization_config
             )
