@@ -13,7 +13,9 @@ eval_batch = 8
 gradient_accumulation_steps = 2
 n_epochs = 1
 freeze_layers = 16 # there're 42 layers in total, we don't add adapters to the first 16 layers
-start_lr = 0.0004
+base_model_lr = 2e-6
+feature_fc_lr = 1e-4
+classifier_lr = 1e-3
 warmup_steps = 20
 random_seed = 707 # should be the same for every config
 optim_type = "adamw_8bit"
@@ -24,7 +26,7 @@ transformers_basemodel_path = 'unsloth/gemma-2-2b'
 basemodel_path = '../BaseModel/gemma2_2b_unsloth' # loading from file and not from Transformers (faster)
 quantize = '4bit'
 fp16 = True
-feature_dims = 4
+feature_dims = 63
 num_classes = 1
 hidden_dim=128
 #--- lora part ----
@@ -70,6 +72,15 @@ fp16 = True
 hidden_dim=4096
 
 #--------------------------------------------------------------------------
+[prepare_gemma2_9b_fp16_4bit_h2048]
+config_name = 'prepare_gemma2_9b_fp16_4bit_h2048'
+transformers_basemodel_path = 'google/gemma-2-9b-it'
+basemodel_path = '../BaseModel/gemma2_9b_fp16_4bit'
+quantize = '4bit'
+fp16 = True
+hidden_dim=2048
+
+#--------------------------------------------------------------------------
 [prepare_BGE_gemma2_9b_fp16_h4096]
 config_name = 'prepare_BGE_gemma2_9b_fp16_h4096'
 transformers_basemodel_path = 'BAAI/bge-multilingual-gemma2'
@@ -82,16 +93,21 @@ hidden_dim=4096
 #--------------------------------------------------------------------------
 # Just to make sure everything run smoothly - ultra speed test config
 [micro]
-train_data = '../Data/Preprocessed/train_preprocessed_FULL_EN.csv'
-config_name = 'micro_gemma2_2b_fp16'
+train_data = '../Data/Preprocessed/train_preprocessed_FULL_custom.csv'
+#train_data = '../Data/Preprocessed/train_preprocessed_FULL_EN.csv'
+#train_data = '../Data/Preprocessed/train_preprocessed_FULL_original.csv'
+config_name = 'micro_gemma2_2b_fp16_4bit'
 transformers_basemodel_path = 'unsloth/gemma-2-2b'
-basemodel_path = '../BaseModel/gemma2_2b_unsloth_fp16'
+basemodel_path = '../BaseModel/gemma2_2b_unsloth_fp16_4bit'
 quantize = '4bit'
 fp16 = True
 train_batch = 2
 eval_batch = 2
 n_epochs = 5
 sample_size = 0.01
+base_model_lr = 2e-6
+feature_fc_lr = 1e-3
+classifier_lr = 1e-3
 max_length=256
 spread_max_length = False
 hidden_dim=512
@@ -99,10 +115,11 @@ hidden_dim=512
 #--------------------------------------------------------------------------
 # Just to make sure everything run smoothly - ultra speed test config
 [micro_test]
-train_data = '../Data/Preprocessed/train_preprocessed_FULL_EN.csv'
-config_name = 'micro_gemma2_2b_fp16'
+train_data = '../Data/Preprocessed/train_preprocessed_FULL_custom.csv'
+#train_data = '../Data/Preprocessed/train_preprocessed_FULL_EN.csv'
+config_name = 'micro_gemma2_2b_fp16_4bit'
 transformers_basemodel_path = 'unsloth/gemma-2-2b'
-basemodel_path = '../BaseModel/gemma2_2b_unsloth_fp16'
+basemodel_path = '../BaseModel/gemma2_2b_unsloth_fp16_4bit'
 quantize = '4bit'
 fp16 = True
 train_batch = 2
@@ -160,3 +177,19 @@ n_epochs = 3
 max_length = 2048
 spread_max_length = False
 hidden_dim=4096
+
+#--------------------------------------------------------------------------
+[gemma2_9b_fp16_4bit_h2048]
+config_name = 'gemma2_9b_fp16_4bit_h2048'
+train_data = '../Data/Preprocessed/train_preprocessed_FULL_custom.csv'
+transformers_basemodel_path = 'google/gemma-2-9b-it'
+basemodel_path = '../BaseModel/gemma2_9b_fp16_4bit'
+quantize = '4bit'
+train_batch=4
+eval_batch=4
+fp16 = True
+sample_size = 0.25
+n_epochs = 3
+max_length = 2048
+spread_max_length = False
+hidden_dim=2048

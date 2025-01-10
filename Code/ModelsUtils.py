@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
 import torch.nn.functional as F
+import torch.nn.init as init
 
 from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
 
@@ -16,6 +17,10 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import pickle
 
+from textblob import TextBlob #for sentiment analysis
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
 
 #-------------------------------------------------------------------
 label2name = {0: 'model_a', 1: 'model_b'}
@@ -23,6 +28,36 @@ name2label = {v:k for k, v in label2name.items()}
 class_labels = list(label2name.keys())
 class_names = list(label2name.values())
 
+feature_list_bycol = [
+    '_len',
+    '_spaces',
+    '_punct',
+    '_question_mark',
+    '_quot',
+    '_formatting_chars',
+    '_math_chars',
+    '_curly_open',
+    '_curly_close',
+    '_round_open',
+    '_round_close',
+    '_special_chars',
+    '_digits',
+    '_lower',
+    '_upper',
+    '_chinese',
+    '_round_balance',
+    '_curly_balance',
+    '_json',
+    '_sentiment',
+]
+
+feature_added_manually = [
+    'cosine_similarity_a',
+    'cosine_similarity_b',
+    'cosine_similarity_diff',
+]
+
+# 63 features in total
 
 #-------------------------------------------------------------------
 # Define a function to create options based on the prompt and choices
@@ -84,7 +119,7 @@ def save_history(history, config, checkpointName):
 
 
 #-------------------------------------------------------------------
-def laod_history(config, checkpointName):
+def load_history(config, checkpointName):
     savePath = config.checkpoints_path + '/' + config.config_name + '/' + checkpointName
     with open(savePath+'history.pkl', 'rb') as fp:
         history = pickle.load(fp)
@@ -165,16 +200,6 @@ def predict(model, dataloader, device="cuda"):
     return predictions
 
 
-# #-------------------------------------------------------------------
-# def compute_metrics(eval_preds: EvalPrediction) -> dict:
-#     preds = eval_preds.predictions
-#     labels = eval_preds.label_ids
-#     probs = torch.from_numpy(preds).float().softmax(-1).numpy()
-#     loss = log_loss(y_true=labels, y_pred=probs)
-#     acc = accuracy_score(y_true=labels, y_pred=preds.argmax(-1))
-#     return {"acc": acc, "log_loss": loss}
-
-
 #-------------------------------------------------------------------
 # Evaluation (used for trainning)
 def evaluate_model(model, dataloader, device="cuda"):
@@ -184,10 +209,7 @@ def evaluate_model(model, dataloader, device="cuda"):
     correct = 0
     total_samples = 0
 
-    # Use BCEWithLogitsLoss for one-hot encoded labels
     loss_fn = nn.BCELoss()
-    #loss_fn = nn.BCEWithLogitsLoss()
-    #loss_fn = nn.BCELoss()
 
     with torch.no_grad():
         for batch in tqdm(dataloader, total=len(dataloader), unit='row'):
@@ -195,7 +217,7 @@ def evaluate_model(model, dataloader, device="cuda"):
             logits = model(
                 input_ids=batch['input_ids'].to(device),
                 attention_mask=batch['attention_mask'].to(device),
-                #features=batch['features'].to(device)
+                features=batch['features'].to(device)
             )
 
             labels = batch['label'].to(device)  # One-hot encoded labels
@@ -234,6 +256,8 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
     history["best_loss"]=0
     history["best_acc"]=0
 
+    loss_fn = nn.BCELoss()
+
     now = datetime.now()
     date_time = now.strftime("%m-%d-%Y_%H-%M")
     checkpoint_prefix = date_time+'_'+str(config.max_length)+'_'
@@ -250,16 +274,14 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
             logits = model(
                 input_ids=batch['input_ids'].to(device),
                 attention_mask=batch['attention_mask'].to(device),
-                #features=batch['features'].to(device)
+                features=batch['features'].to(device)
             )
             
             # One-hot labels
             labels = batch['label'].to(device)
         
-            loss = nn.BCELoss()(logits, labels)
+            loss = loss_fn(logits, labels)
         
-            # Use BCELoss for one-hot encoded labels
-            #loss = nn.BCELoss()(logits, labels)
             loss.backward()
             optimizer.step()
             if scheduler is not None:
@@ -331,35 +353,35 @@ class PreferencePredictionModel(nn.Module):
         transformer_hidden_size = gemma_model.config.hidden_size
         
         # Fully connected layers for features
-        #self.feature_fc = nn.Linear(feature_dim, 64)
+        self.feature_fc = nn.Linear(feature_dim, 128)
+        # Xavier initialization for feature_fc weights
+        init.xavier_uniform_(self.feature_fc.weight)
+        if self.feature_fc.bias is not None:
+            init.zeros_(self.feature_fc.bias)
         
         # Final classification layer
         self.classifier = nn.Sequential(
-            #nn.Linear(transformer_hidden_size + 64, 128),  # Combine response1, response2, and features
-            nn.Linear(transformer_hidden_size, hidden_dim),
+            nn.Linear(transformer_hidden_size + 128, hidden_dim), #embedding + features
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(hidden_dim, num_classes),
             nn.Sigmoid()
         )
     
-    def forward(self, input_ids, attention_mask, features=None):
+    def forward(self, input_ids, attention_mask, features):
         outputs = self.gemma_model(input_ids=input_ids, attention_mask=attention_mask) #, output_hidden_states=True
         #embedding = last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
         embeddings = last_token_pool(outputs.last_hidden_state, attention_mask)
         #.hidden_states[-1][0, -1, :]
         
-        # normalize embeddings ????
         embeddings = F.normalize(embeddings, p=2, dim=1)
         
-        #cls_embedding = output.last_hidden_state[:, 0, :]  # CLS token ?
-        
         # Feature processing
-        #feature_output = self.feature_fc(features)
+        feature_output = self.feature_fc(features)
+        feature_output = F.normalize(feature_output, p=2, dim=1)
         
         # Concatenate and classify
-        #combined = torch.cat((cls_embedding_resp1, cls_embedding_resp2, feature_output), dim=1)
-        combined = embeddings
+        combined = torch.cat((embeddings, feature_output), dim=1)
         logits = self.classifier(combined)
         
         return logits
@@ -376,7 +398,7 @@ def custom_save_model_chkpt(model, config, checkpointName, epoch=0, optimizer=No
     torch.save({
         'epoch': epoch,
         #'optimizer_state_dict': optimizer.state_dict(),
-        #'feature_fc_state_dict', predictionModel_original.fc.state_dict()
+        'feature_fc_state_dict': model.feature_fc.state_dict(),
         'classifier_state_dict': model.classifier.state_dict(),
         }, f'{savePath}/PreferencePredictionModel.pt')
 
@@ -388,7 +410,7 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
         quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.bfloat16,  # bfloat16 is recommended
-                bnb_4bit_use_double_quant=False,
+                bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type='nf4',
                 )
     
@@ -425,6 +447,7 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
     
     checkpoint = torch.load(f'{loadPath}/PreferencePredictionModel.pt', weights_only=True)
     
+    predictionModelLoaded.feature_fc.load_state_dict(checkpoint['feature_fc_state_dict'])
     predictionModelLoaded.classifier.load_state_dict(checkpoint['classifier_state_dict'])
     
     return predictionModelLoaded
@@ -449,20 +472,23 @@ class ChatbotArenaDataset(Dataset):
         tokens = tokenize(self.tokenizer, [row['prompt']], [row['response_a']], [row['response_b']], max_length=self.max_length)
         
         # Extract features
-        #features = torch.tensor([
-        #    #row['resp1_length'],
-        #    #row['resp2_length'],
-        #    row['length_diff'],
-        #    #row['resp1_lexical_div'],
-        #    #row['resp2_lexical_div'],
-        #    row['lexical_div_diff'],
-        #    #row['resp1_similarity'],
-        #    #row['resp2_similarity'],
-        #    row['similarity_diff'],
-        #    #row['resp1_keyword_overlap'],
-        #    #row['resp2_keyword_overlap'],
-        #    row['keyword_overlap_diff'],
-        #], dtype=torch.float)
+        features = torch.tensor([], dtype=torch.float)
+
+        for feat in feature_list_bycol:
+            feat = torch.tensor([
+                row[f'prompt{feat}'],
+                row[f'response_a{feat}'],
+                row[f'response_b{feat}']
+                ], dtype=torch.float)
+            features = torch.cat((features, feat))
+
+        similarity_feat = torch.tensor([
+                row[f'cosine_similarity_a'],
+                row[f'cosine_similarity_b'],
+                row[f'cosine_similarity_diff']
+                ], dtype=torch.float)
+
+        features = torch.cat((features, similarity_feat))
 
         if not self.test:
             # Label
@@ -473,14 +499,14 @@ class ChatbotArenaDataset(Dataset):
             return {
                 'input_ids': tokens['input_ids'].squeeze(0),
                 'attention_mask': tokens['attention_mask'].squeeze(0),
-                #'features': features,
+                'features': features,
                 'label': label
             }
         else:
             return {
                 'input_ids': tokens['input_ids_resp1'].squeeze(0),
                 'attention_mask': tokens['attention_mask'].squeeze(0),
-                #'features': features
+                'features': features
             }
 
 
@@ -488,85 +514,91 @@ class ChatbotArenaDataset(Dataset):
 #-------------------------------------------------------------------
 #----------------------- FEATURE ENGINEERING -----------------------
 #-------------------------------------------------------------------
+def compute_feats(df):
+    for col in ["response_a","response_b","prompt"]:
+        #df[f"{col}_len"]=df[f"{col}"].str.len()
 
-#-------------------------------------------------------------------
-def add_length_features(df):
-    df['resp1_length'] = df['response_a'].apply(len)
-    df['resp2_length'] = df['response_b'].apply(len)
-    df['length_diff'] = df['resp1_length'] - df['resp2_length']  # Difference in lengths
+        # Calculating Features:
+        df[f"{col}_spaces"]=df[f"{col}"].str.count("\s")
+        df[f"{col}_punct"]=df[f"{col}"].str.count(",|\.|!")
+        df[f"{col}_question_mark"]=df[f"{col}"].str.count("\?")
+        df[f"{col}_quot"]=df[f"{col}"].str.count("'|\"")
+        df[f"{col}_formatting_chars"]=df[f"{col}"].str.count("\*|\_")
+        df[f"{col}_math_chars"]=df[f"{col}"].str.count("\-|\+|\=")
+        df[f"{col}_curly_open"]=df[f"{col}"].str.count("\{")
+        df[f"{col}_curly_close"]=df[f"{col}"].str.count("}")
+        df[f"{col}_round_open"]=df[f"{col}"].str.count("\(")
+        df[f"{col}_round_close"]=df[f"{col}"].str.count("\)")
+        df[f"{col}_special_chars"]=df[f"{col}"].str.count("\W")
+        df[f"{col}_digits"]=df[f"{col}"].str.count("\d") #>0.astype('int32')
+        df[f"{col}_lower"]=df[f"{col}"].str.count("[a-z]").astype("float32")/df[f"{col}_len"]
+        df[f"{col}_upper"]=df[f"{col}"].str.count("[A-Z]").astype("float32")/df[f"{col}_len"]
+        df[f"{col}_chinese"]=df[f"{col}"].str.count(r'[\u4e00-\u9fff]+').astype("float32")/df[f"{col}_len"]
+
+        # Bracket Balance Features:
+        df[f"{col}_round_balance"]=df[f"{col}_round_open"]-df[f"{col}_round_close"]
+        df[f"{col}_curly_balance"]=df[f"{col}_curly_open"]-df[f"{col}_curly_close"]
+
+        # JSON Feature:
+        df[f"{col}_json"]=df[f"{col}"].str.lower().str.count("json")
+        # 19*3 = 57 features == all columns - 6
     return df
 
-#-------------------------------------------------------------------
-def lexical_diversity(text):
-    tokens = text.split()  # Tokenize by whitespace
-    return len(set(tokens)) / len(tokens) if len(tokens) > 0 else 0
 
-def add_lexical_features(df):
-    df['resp1_lexical_div'] = df['response_a'].apply(lexical_diversity)
-    df['resp2_lexical_div'] = df['response_b'].apply(lexical_diversity)
-    df['lexical_div_diff'] = df['resp1_lexical_div'] - df['resp2_lexical_div']
+#-------------------------------------------------------------------
+def add_computed_feats(df):
+    df = compute_feats(df)
     return df
 
-#-------------------------------------------------------------------
-#from transformers import pipeline
-
-## Load sentiment analysis pipeline (ensure it's multilingual)
-#sentiment_analyzer = pipeline("sentiment-analysis", model="nlptown/bert-base-multilingual-uncased-sentiment", device=0)
-#
-#def get_sentiment(text):
-#    result = sentiment_analyzer(text[:512])  # Truncate to 512 tokens for BERT-based models
-#    return result[0]['label']
-#
-#def add_sentiment_features(df):
-#    df['resp1_sentiment'] = df['response_a'].apply(get_sentiment)
-#    df['resp2_sentiment'] = df['response_b'].apply(get_sentiment)
-#    # Convert sentiments to numeric scale (e.g., positive=1, neutral=0, negative=-1)
-#    sentiment_map = {'positive': 1, 'neutral': 0, 'negative': -1}
-#    df['resp1_sentiment_num'] = df['resp1_sentiment'].map(sentiment_map)
-#    df['resp2_sentiment_num'] = df['resp2_sentiment'].map(sentiment_map)
-#    df['sentiment_diff'] = df['resp1_sentiment_num'] - df['resp2_sentiment_num']
-#    return df
 
 #-------------------------------------------------------------------
-def calculate_similarity(prompt, response, embedder):
-    embeddings = embedder.encode([prompt, response])
-    return cosine_similarity([embeddings[0]], [embeddings[1]])[0][0]
+def get_sentiment(text):
+    return TextBlob(text).sentiment.polarity
 
-def add_similarity_features(df, embedder):
-    df['resp1_similarity'] = df.apply(lambda x: calculate_similarity(x['prompt'], x['response_a'], embedder), axis=1)
-    df['resp2_similarity'] = df.apply(lambda x: calculate_similarity(x['prompt'], x['response_b'], embedder), axis=1)
-    df['similarity_diff'] = df['resp1_similarity'] - df['resp2_similarity']
+
+#-------------------------------------------------------------------
+def add_sentiment_polarity(df):
+    df['prompt_sentiment'] = df['prompt'].apply(get_sentiment)
+    df['response_a_sentiment'] = df['response_a'].apply(get_sentiment)
+    df['response_b_sentiment'] = df['response_b'].apply(get_sentiment)
     return df
 
-#from keybert import KeyBERT
-
-# Use KeyBERT for keyword extraction
-#kw_model = KeyBERT()
-
 
 #-------------------------------------------------------------------
-def get_keyword_overlap(prompt, response, kw_model):
-    prompt_keywords = set([kw[0] for kw in kw_model.extract_keywords(prompt)])
-    response_keywords = set([kw[0] for kw in kw_model.extract_keywords(response)])
-    overlap = len(prompt_keywords & response_keywords)
-    return overlap / len(prompt_keywords) if len(prompt_keywords) > 0 else 0
+def add_cosine_similarity(df):
+    vectorizer = TfidfVectorizer(max_features=200)
+    cosine_similarities_a=[]
+    cosine_similarities_b=[]
 
-def add_keyword_overlap_features(df, kw_model):
-    df['resp1_keyword_overlap'] = df.apply(lambda x: get_keyword_overlap(x['prompt'], x['response_a'], kw_model), axis=1)
-    df['resp2_keyword_overlap'] = df.apply(lambda x: get_keyword_overlap(x['prompt'], x['response_b'], kw_model), axis=1)
-    df['keyword_overlap_diff'] = df['resp1_keyword_overlap'] - df['resp2_keyword_overlap']
+    for i in range(len(df)):
+        prompt = df['prompt'].iloc[i].strip()
+        response_a = df['response_a'].iloc[i].strip()
+        response_b = df['response_b'].iloc[i].strip()
+
+        if not prompt or not response_a or not response_b:
+            cosine_similarities_a.append(-1)
+            cosine_similarities_b.append(-1)
+            continue
+        try:
+            tfidf_matrix= vectorizer.fit_transform([prompt])
+            tfidf_matrix_a = vectorizer.transform([response_a])
+            tfidf_matrix_b = vectorizer.transform([response_b])
+            cosine_similarities_a.append(cosine_similarity(tfidf_matrix, tfidf_matrix_a)[0][0])
+            cosine_similarities_b.append(cosine_similarity(tfidf_matrix, tfidf_matrix_b)[0][0])
+        except Exception as e:
+            print(f"Error processing document {i}: {e}")
+            cosine_similarities_a.append(-1)
+            cosine_similarities_b.append(-1)
+
+    df['cosine_similarity_a'] = cosine_similarities_a
+    df['cosine_similarity_b'] = cosine_similarities_b
+    df['cosine_similarity_diff']=df['cosine_similarity_a'] - df['cosine_similarity_b'] 
     return df
 
 
 #-------------------------------------------------------------------
 def extract_all_features(df):
-    total_features = 0
-    #df = add_length_features(df)
-    #df = add_lexical_features(df)
-    #df = add_sentiment_features(df)
-    #df = add_similarity_features(df, embedder)
-    #df = add_keyword_overlap_features(df, kw_model)
-    #df = add_formality_features(df)
-    #df = add_ner_features(df)
-    total_features += 1
-    return df, total_features
+    df = add_computed_feats(df)
+    df = add_sentiment_polarity(df)
+    df = add_cosine_similarity(df)
+    return df
