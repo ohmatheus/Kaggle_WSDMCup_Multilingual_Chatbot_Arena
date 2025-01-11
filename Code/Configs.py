@@ -188,8 +188,49 @@ quantize = '4bit'
 train_batch=4
 eval_batch=4
 fp16 = True
-sample_size = 0.25
+sample_size = 0.1
+n_epochs = 3
+max_length = 2048
+spread_max_length = False
+hidden_dim=1024
+base_model_lr = 2e-6
+feature_fc_lr = 1e-3
+classifier_lr = 1e-3
+
+#--------------------------------------------------------------------------
+[BGE_multi_gemma2_9b_fp16_4bit_h1536]
+config_name = 'BGE_multi_gemma2_9b_fp16_4bit_h1024'
+train_data = '../Data/Preprocessed/train_preprocessed_FULL_custom.csv'
+transformers_basemodel_path = 'BAAI/bge-multilingual-gemma2'
+basemodel_path = '../BaseModel/BGE_multi_gemma2_9b_fp16_4bit'
+quantize = '4bit'
+train_batch=4
+eval_batch=4
+fp16 = True
+sample_size = 0.1
+n_epochs = 3
+max_length = 2048
+spread_max_length = False
+hidden_dim=1536
+base_model_lr = 2e-6
+feature_fc_lr = 1e-3
+classifier_lr = 1e-3
+
+#--------------------------------------------------------------------------
+[gemma2_9b_fp16_4bit_h2048_BGE_multiligual]
+config_name = 'gemma2_9b_fp16_4bit_h2048_BGE_multiligual'
+train_data = '../Data/Preprocessed/train_preprocessed_FULL_custom.csv'
+transformers_basemodel_path = 'google/gemma-2-9b-it'
+basemodel_path = '../BaseModel/gemma2_9b_fp16_4bit'
+quantize = '4bit'
+train_batch=4
+eval_batch=4
+fp16 = True
+sample_size = 0.1
 n_epochs = 3
 max_length = 2048
 spread_max_length = False
 hidden_dim=2048
+base_model_lr = 2e-6
+feature_fc_lr = 1e-3
+classifier_lr = 1e-3

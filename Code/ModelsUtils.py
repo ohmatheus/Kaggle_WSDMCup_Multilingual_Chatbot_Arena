@@ -114,6 +114,7 @@ def tokenize(tokenizer, prompt, response_a, response_b, max_length=256, spread_m
 #-------------------------------------------------------------------
 def save_history(history, config, checkpointName):
     savePath = config.checkpoints_path + '/' + config.config_name + '/' + checkpointName + '/'
+    history['config_name'] = config.config_name
     with open(savePath+'history.pkl', 'wb') as fp:
         pickle.dump(history, fp)
 
@@ -132,6 +133,7 @@ def plot_model_history(history, title):
     val_loss = history['valid_loss']
     acc = history['train_accum_accuracy']
     val_acc = history['valid_accuracy']
+    config_name = history['config_name']
     
     # show best epoch with a red line ?
 
@@ -139,7 +141,7 @@ def plot_model_history(history, title):
 
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(20, 5))
     
-    fig.suptitle(title)
+    fig.suptitle(title + ' ' + config_name)
     
     ax[0].set(title='Loss')
     ax[0].plot(epochs, loss, label='Training')
