@@ -252,6 +252,7 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
     model = model.to(device)
     model.train()
     min_val_loss = float('inf') #checkpoint
+    min_acc = 0
     history = {"train_accum_loss" : [], "train_accum_accuracy" : [], "valid_loss" : [], 
                 "valid_accuracy" : []}
     history["best_epoch"]=0
@@ -319,13 +320,18 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
         chkptName = checkpoint_prefix + 'train'
         
         if min_val_loss > metrics['loss']:
-            print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint, epoch: ", epoch + 1)
-            custom_save_model_chkpt(model, config, checkpointName=chkptName, epoch=epoch+1)
+            print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint_lossBest, epoch: ", epoch + 1)
+            custom_save_model_chkpt(model, config, checkpointName=chkptName+"_lossBest", epoch=epoch+1)
             history["best_epoch"] = epoch + 1
             history["best_loss"] = metrics['loss']
-            history["best_acc"] = metrics['accuracy']
-            
             min_val_loss = metrics['loss']
+            
+        if min_acc < metrics['accuracy']:
+            print(f"{metrics['accuracy']} val accuracy is better than previous {min_acc}, saving checkpoint_accBest, epoch: ", epoch + 1)
+            custom_save_model_chkpt(model, config, checkpointName=chkptName+"_accBest", epoch=epoch+1)
+            history["best_epoch"] = epoch + 1
+            history["best_acc"] = metrics['accuracy']
+            min_acc = metrics['accuracy']
 
         save_history(history, config, chkptName)
         print(f"-----------------------------------------------------------------")
