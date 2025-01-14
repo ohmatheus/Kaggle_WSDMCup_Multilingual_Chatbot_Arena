@@ -5,7 +5,7 @@ from torch import Tensor
 import torch.nn.functional as F
 import torch.nn.init as init
 
-from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModel, AutoTokenizer, BitsAndBytesConfig, AutoModelForCausalLM
 
 from tqdm import tqdm
 
@@ -157,51 +157,6 @@ def plot_model_history(history, title):
     return fig
 
 
-
-#-------------------------------------------------------------------
-def predict(model, dataloader, device="cuda"):
-    """
-    Predict outcomes using a DataLoader for the test dataset.
-
-    Args:
-        model: Trained PyTorch model.
-        dataloader: DataLoader for the test dataset.
-        device: Device to perform inference ('cpu' or 'cuda').
-
-    Returns:
-        A list of predicted class labels for the entire test dataset.
-    """
-    model = model.to(device)
-    model.eval()  # Set model to evaluation mode
-    predictions = []
-
-    with torch.no_grad():
-        for batch in dataloader:
-            # Move data to device
-            input_ids_resp1 = batch['input_ids_resp1'].to(device)
-            attention_mask_resp1 = batch['attention_mask_resp1'].to(device)
-            input_ids_resp2 = batch['input_ids_resp2'].to(device)
-            attention_mask_resp2 = batch['attention_mask_resp2'].to(device)
-            features = batch['features'].to(device)
-
-            # Forward pass through the model
-            logits = model(
-                input_ids_resp1=input_ids_resp1,
-                attention_mask_resp1=attention_mask_resp1,
-                input_ids_resp2=input_ids_resp2,
-                attention_mask_resp2=attention_mask_resp2,
-                features=features
-            )
-
-            # Convert logits to predicted class
-            #batch_predictions = torch.argmax(logits, dim=1).cpu().tolist()
-            #batch_predictions = logits.cpu().tolist()
-            batch_probs = torch.softmax(logits, dim=1).cpu().tolist()
-            predictions.extend(batch_probs)
-
-    return predictions
-
-
 #-------------------------------------------------------------------
 # Evaluation (used for trainning)
 def evaluate_model(model, dataloader, device="cuda"):
@@ -333,7 +288,7 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
             history["best_acc"] = metrics['accuracy']
             min_acc = metrics['accuracy']
 
-        save_history(history, config, chkptName)
+        save_history(history, config, chkptName+"_lossBest")
         print(f"-----------------------------------------------------------------")
         #for param_group in optimizer.param_groups:
         #    print(f"Current learning rate: {param_group['lr']}")
@@ -351,6 +306,13 @@ def last_token_pool(last_hidden_states: Tensor,
         batch_size = last_hidden_states.shape[0]
         return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
 
+# #-------------------------------------------------------------------
+# def last_token_pool(hidden_states, attention_mask):
+#     # Use the mean of non-masked tokens for pooling (faster on GPU)
+#     mask = attention_mask.unsqueeze(-1).float()
+#     pooled = torch.sum(hidden_states * mask, dim=1) / torch.sum(mask, dim=1)
+#     return pooled
+
 #-------------------------------------------------------------------
 class PreferencePredictionModel(nn.Module):
     def __init__(self, gemma_model, feature_dim, hidden_dim=128, num_classes=2):
@@ -358,6 +320,7 @@ class PreferencePredictionModel(nn.Module):
         
         # Load transformer model
         self.gemma_model = gemma_model #AutoModel.from_pretrained(transformer_name)
+        #transformer_hidden_size = gemma_model.model.model.config.hidden_size
         transformer_hidden_size = gemma_model.config.hidden_size
         
         # Fully connected layers for features
@@ -370,6 +333,7 @@ class PreferencePredictionModel(nn.Module):
         # Final classification layer
         self.classifier = nn.Sequential(
             nn.Linear(transformer_hidden_size + 128, hidden_dim), #embedding + features
+            #nn.Linear(transformer_hidden_size, hidden_dim), #embedding + features
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(hidden_dim, num_classes),
@@ -377,7 +341,9 @@ class PreferencePredictionModel(nn.Module):
         )
     
     def forward(self, input_ids, attention_mask, features):
+        #outputs = self.gemma_model.model.model(input_ids=input_ids, attention_mask=attention_mask) # dont take head from causalLM, just model
         outputs = self.gemma_model(input_ids=input_ids, attention_mask=attention_mask) #, output_hidden_states=True
+        
         #embedding = last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
         embeddings = last_token_pool(outputs.last_hidden_state, attention_mask)
         #.hidden_states[-1][0, -1, :]
@@ -390,6 +356,7 @@ class PreferencePredictionModel(nn.Module):
         
         # Concatenate and classify
         combined = torch.cat((embeddings, feature_output), dim=1)
+        #combined = embeddings
         logits = self.classifier(combined)
         
         return logits
@@ -414,20 +381,19 @@ def custom_save_model_chkpt(model, config, checkpointName, epoch=0, optimizer=No
 def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu", is_trainable=True, optimizer=None):
     # load base
     quantization_config = None
-    if config.quantize=='4bit':
+    if config.quantize=='4bit': #should not be use as this is choosed when preparing model see 'Prepare_BaseModel' notebook
         quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.bfloat16,  # bfloat16 is recommended
-                bnb_4bit_use_double_quant=True,
+                bnb_4bit_use_double_quant=False,
                 bnb_4bit_quant_type='nf4',
                 )
     
     baseModel = AutoModel.from_pretrained(
             config.basemodel_path,
-            torch_dtype=torch.float16 if config.fp16 else "auto",
-            #torch_dtype='auto', # we already choose that first time we downloaded model from hugginface
+            torch_dtype=torch.float16,
             device_map=device,
-            quantization_config=quantization_config
+            #quantization_config=quantization_config
             )
 
     baseModel = prepare_model_for_kbit_training(baseModel)
@@ -477,7 +443,8 @@ class ChatbotArenaDataset(Dataset):
         row = self.data.iloc[idx]
 
         # Tokenize the text
-        tokens = tokenize(self.tokenizer, [row['prompt']], [row['response_a']], [row['response_b']], max_length=self.max_length)
+        #tokens = tokenize(self.tokenizer, [row['prompt']], [row['response_a']], [row['response_b']], max_length=self.max_length)
+        tokens = row['tokens']
         
         # Extract features
         features = torch.tensor([], dtype=torch.float)
@@ -512,7 +479,7 @@ class ChatbotArenaDataset(Dataset):
             }
         else:
             return {
-                'input_ids': tokens['input_ids_resp1'].squeeze(0),
+                'input_ids': tokens['input_ids'].squeeze(0),
                 'attention_mask': tokens['attention_mask'].squeeze(0),
                 'features': features
             }
