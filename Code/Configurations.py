@@ -1,5 +1,4 @@
 
-
 #----------------------------------------------------------------
 class ConfigSection:
     """Represents a section in the configuration file."""
@@ -47,6 +46,14 @@ class ConfigSection:
             return eval(value)
         except ValueError:
             return value  # Return as string if it can't be cast
+
+    def __getstate__(self):
+        """Return the state for pickling or copying."""
+        return self.__dict__
+
+    def __setstate__(self, state):
+        """Restore the state from pickling or copying."""
+        self.__dict__.update(state)
 
 
 #----------------------------------------------------------------

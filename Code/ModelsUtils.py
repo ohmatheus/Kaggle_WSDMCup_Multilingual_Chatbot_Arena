@@ -206,7 +206,7 @@ def evaluate_model(model, dataloader, device="cuda"):
 def train_model(model, dataloader, valid_dataloader, optimizer, config, scheduler=None,  device="cuda"):
     model = model.to(device)
     model.train()
-    min_val_loss = float('inf') #checkpoint
+    min_val_loss = float('inf')
     min_acc = 0
     history = {"train_accum_loss" : [], "train_accum_accuracy" : [], "valid_loss" : [], 
                 "valid_accuracy" : []}
@@ -396,7 +396,7 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
             #quantization_config=quantization_config
             )
 
-    baseModel = prepare_model_for_kbit_training(baseModel)
+    #baseModel = prepare_model_for_kbit_training(baseModel)
 
     peftModelPath = ""
     if loadFrom:
