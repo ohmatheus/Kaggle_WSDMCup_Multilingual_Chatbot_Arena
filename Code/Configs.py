@@ -36,6 +36,7 @@ feature_dims = 63
 num_classes = 1
 hidden_dim=128
 #--- lora part ----
+prepare_kbit_training=True # at load
 lora_r = 16
 lora_alpha = 32
 lora_dropout = 0.05
@@ -64,6 +65,7 @@ classifier_lr = 5e-4
 max_length=256
 spread_max_length = False
 hidden_dim=10
+prepare_kbit_training=True
 
 #--------------------------------------------------------------------------
 [runpod_1]

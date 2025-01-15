@@ -203,7 +203,7 @@ def evaluate_model(model, dataloader, device="cuda"):
 
 
 #-------------------------------------------------------------------
-def train_model(model, dataloader, valid_dataloader, optimizer, config, scheduler=None,  device="cuda"):
+def train_model(model, dataloader, dataloader_train_swap, valid_dataloader, optimizer, config, scheduler=None,  device="cuda"):
     model = model.to(device)
     model.train()
     min_val_loss = float('inf')
@@ -226,7 +226,12 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
         correct = 0
         total_samples = 0
         
-        for batch in tqdm(dataloader, total=len(dataloader), unit='row'):
+        if epoch % 2 == 0:
+            current_loader = dataloader
+        else:
+            current_loader = dataloader_train_swap
+        
+        for batch in tqdm(current_loader, total=len(current_loader), unit='row'):
             optimizer.zero_grad()
             
             logits = model(
@@ -257,7 +262,7 @@ def train_model(model, dataloader, valid_dataloader, optimizer, config, schedule
         
         # add date and hour + epochs in checkpoint_name
         # Calculate average loss and accuracy
-        avg_loss = total_loss / len(dataloader)
+        avg_loss = total_loss / len(current_loader)
         accuracy = correct / total_samples
 
         metrics = evaluate_model(model, valid_dataloader, device=device)
@@ -378,14 +383,14 @@ def custom_save_model_chkpt(model, config, checkpointName, epoch=0, optimizer=No
         }, f'{savePath}/PreferencePredictionModel.pt')
 
 #-------------------------------------------------------------------
-def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu", is_trainable=True, optimizer=None):
+def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu", is_trainable=True):
     # load base
     quantization_config = None
     if config.quantize=='4bit': #should not be use as this is choosed when preparing model see 'Prepare_BaseModel' notebook
         quantization_config=BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.bfloat16,  # bfloat16 is recommended
-                bnb_4bit_use_double_quant=False,
+                bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type='nf4',
                 )
     
@@ -396,7 +401,8 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
             #quantization_config=quantization_config
             )
 
-    #baseModel = prepare_model_for_kbit_training(baseModel)
+    if config.prepare_kbit_training: # gradient checkpointing : reduce size, slower trainning
+        baseModel = prepare_model_for_kbit_training(baseModel)
 
     peftModelPath = ""
     if loadFrom:
