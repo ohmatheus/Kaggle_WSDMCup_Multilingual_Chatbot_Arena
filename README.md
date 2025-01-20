@@ -327,7 +327,7 @@ dummy = config.any_configuration_present_in_file
 
 
 ## Links
-- My main source of inspiration : [here](https://www.kaggle.com/code/emiz6413/training-gemma-2-9b-4-bit-qlora-fine-tuning/notebook?scriptVersionId=187770530). Key in hand code for quantized qlora gemma2 9b, that a read, understood, and redone to fit my personnal strategy (didn't copy/paste code). From there i was able to check Gemma2' benchmarks, and start documenting myself on Lora/PEFT and quantization. 
+- My main source of inspiration (from another competition) : [here](https://www.kaggle.com/code/emiz6413/training-gemma-2-9b-4-bit-qlora-fine-tuning/notebook?scriptVersionId=187770530). Key in hand code for quantized qlora gemma2 9b, that a read, understood, and redone to fit my personnal strategy (didn't copy/paste code). From there i was able to check Gemma2' benchmarks, and start documenting myself on Lora/PEFT and quantization. 
 
 
 ## Conclusion
