@@ -92,9 +92,11 @@ def evaluate_model(model, dataloader, device=0):
 def DDP_train(rank, world_size, train_data, train_data_swap, valid_data, config,):
     print(f'Process for cuda:{rank} launched.')
     
+    
     #setup_worker_logging(rank, log_queue)
     #logging.info("Test worker log")
     #logging.error("Test worker error log")
+
     
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "29500"
@@ -104,6 +106,10 @@ def DDP_train(rank, world_size, train_data, train_data_swap, valid_data, config,
     os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
     
     dist.init_process_group("gloo", rank=rank, world_size=world_size)
+    
+    torch.cuda.set_device(rank)
+    
+    print(f"Process {rank} is using device: {torch.cuda.current_device()}")
     
     #logging.info("Test worker log 1")
     #logging.error("Test worker error log 2")
@@ -116,8 +122,8 @@ def DDP_train(rank, world_size, train_data, train_data_swap, valid_data, config,
                         )
     
     model = predictionModel
-    model.to(rank)
-    ddp_model = DDP(model, device_ids=[rank]) #find_unused_parameters=True
+    model.to(f'cuda:{rank}')
+    ddp_model = DDP(model, device_ids=[rank], find_unused_parameters=False)
     
     #print(ddp_model._module_parameters)
     
@@ -159,6 +165,7 @@ def DDP_train(rank, world_size, train_data, train_data_swap, valid_data, config,
         total_loss = 0
         correct = 0
         total_samples = 0
+        ddp_model.train()
         
         if rank % 2 == 0:
             current_loader = train_data
@@ -168,9 +175,9 @@ def DDP_train(rank, world_size, train_data, train_data_swap, valid_data, config,
         for batch in tqdm(current_loader, total=len(current_loader), unit='row') if rank == 0 else current_loader:
             optimizer.zero_grad()
             
-            inputs_ids = batch['input_ids'].to(rank)
-            attention_mask = batch['attention_mask'].to(rank)
-            features = batch['features'].to(rank)
+            inputs_ids = batch['input_ids'].to(f'cuda:{rank}')
+            attention_mask = batch['attention_mask'].to(f'cuda:{rank}')
+            features = batch['features'].to(f'cuda:{rank}')
             
             logits = ddp_model(
                 input_ids=inputs_ids,
@@ -183,7 +190,7 @@ def DDP_train(rank, world_size, train_data, train_data_swap, valid_data, config,
             #print(f'\n\n features:{features} \n\n')
             #print(f'\n\n logits:{logits} \n\n')
             
-            labels = batch['label'].to(rank)
+            labels = batch['label'].to(f'cuda:{rank}')
             #print(f'\n\n labels:{labels} \n\n')
         
             loss = loss_fn(logits, labels)
@@ -211,7 +218,7 @@ def DDP_train(rank, world_size, train_data, train_data_swap, valid_data, config,
         
         if rank==0:
             
-            metrics = evaluate_model(ddp_model, valid_data, device=0)
+            metrics = evaluate_model(ddp_model.module, valid_data, device=f'cuda:{rank}')
             
             # add date and hour + epochs in checkpoint_name
             # Calculate average loss and accuracy
@@ -265,7 +272,7 @@ def script():
     config_file = 'Configs.py'
     manager = Configs.ConfigManager(config_file)
 
-    config = manager.micro
+    config = manager.gemma2_9b_fp16_4bit_h1536
 
     print(f'config : {config.config_name}')
 

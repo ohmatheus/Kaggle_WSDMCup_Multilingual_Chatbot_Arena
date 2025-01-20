@@ -324,8 +324,7 @@ class PreferencePredictionModel(nn.Module):
         super(PreferencePredictionModel, self).__init__()
         
         # Load transformer model
-        self.gemma_model = gemma_model #AutoModel.from_pretrained(transformer_name)
-        #transformer_hidden_size = gemma_model.model.model.config.hidden_size
+        self.gemma_model = gemma_model
         transformer_hidden_size = gemma_model.config.hidden_size
         
         # Fully connected layers for features
@@ -338,7 +337,6 @@ class PreferencePredictionModel(nn.Module):
         # Final classification layer
         self.classifier = nn.Sequential(
             nn.Linear(transformer_hidden_size + 128, hidden_dim), #embedding + features
-            #nn.Linear(transformer_hidden_size, hidden_dim), #embedding + features
             nn.ReLU(),
             nn.Dropout(0.2),
             nn.Linear(hidden_dim, num_classes),
@@ -346,12 +344,9 @@ class PreferencePredictionModel(nn.Module):
         )
     
     def forward(self, input_ids, attention_mask, features):
-        #outputs = self.gemma_model.model.model(input_ids=input_ids, attention_mask=attention_mask) # dont take head from causalLM, just model
         outputs = self.gemma_model(input_ids=input_ids, attention_mask=attention_mask) #, output_hidden_states=True
         
-        #embedding = last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
         embeddings = last_token_pool(outputs.last_hidden_state, attention_mask)
-        #.hidden_states[-1][0, -1, :]
         
         embeddings = F.normalize(embeddings, p=2, dim=1)
         

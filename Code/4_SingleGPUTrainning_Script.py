@@ -97,7 +97,7 @@ def DDP_train(train_data, train_data_swap, valid_data, config,):
                         )
     
     model = predictionModel
-    model.to(rank)
+    model.to(f'cuda:{rank}')
     
     optimizer = optim.AdamW([
         {'params': model.gemma_model.parameters(), 'lr': config.base_model_lr},     # Lower learning rate for transformer layers
@@ -138,7 +138,7 @@ def DDP_train(train_data, train_data_swap, valid_data, config,):
         correct = 0
         total_samples = 0
         
-        if rank % 2 == 0:
+        if epoch % 2 == 0:
             current_loader = train_data
         else:
             current_loader = train_data_swap
@@ -146,9 +146,9 @@ def DDP_train(train_data, train_data_swap, valid_data, config,):
         for batch in tqdm(current_loader, total=len(current_loader), unit='row') if rank == 0 else current_loader:
             optimizer.zero_grad()
             
-            inputs_ids = batch['input_ids'].to(rank)
-            attention_mask = batch['attention_mask'].to(rank)
-            features = batch['features'].to(rank)
+            inputs_ids = batch['input_ids'].to(f'cuda:{rank}')
+            attention_mask = batch['attention_mask'].to(f'cuda:{rank}')
+            features = batch['features'].to(f'cuda:{rank}')
             
             logits = model(
                 input_ids=inputs_ids,
@@ -156,7 +156,7 @@ def DDP_train(train_data, train_data_swap, valid_data, config,):
                 features=features
             )
             
-            labels = batch['label'].to(rank)
+            labels = batch['label'].to(f'cuda:{rank}')
         
             loss = loss_fn(logits, labels)
         
@@ -180,7 +180,7 @@ def DDP_train(train_data, train_data_swap, valid_data, config,):
         
         if rank==0:
             
-            metrics = evaluate_model(model, valid_data, device=0)
+            metrics = evaluate_model(model, valid_data, device=f'cuda:{rank}')
             
             # add date and hour + epochs in checkpoint_name
             # Calculate average loss and accuracy
