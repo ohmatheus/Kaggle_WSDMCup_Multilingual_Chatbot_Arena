@@ -52,20 +52,20 @@ id,winner
 
 ## Data
 ### EDA
-You can check [notebook]() for more details.
+You can check [notebook](https://github.com/ohmatheus/Kaggle_WSDMCup_Multilingual_Chatbot_Arena/blob/main/Code/1_EDA_FE.ipynb) for more details.
 #### Winning Distribution
 Distribution between winning model are pretty even :  
-<img src="./images/distrib.png" width="25%" height="25%">  
+<img src="./images/distrib.png" width="50%" height="50%">  
 No needs for data sample or oversampling. And also the way i'm handling data augmentation will make them perfect 50%-50%
 
 #### Language Distribution
-<img src="./images/distriblang.png" width="25%" height="25%">  
+<img src="./images/distriblang.png" width="50%" height="50%">  
 
 There's a lot of different languages, most of it is in english. Since Gemma2 is 'mostly' trainned in english with some multiligual capabilities, this is perfectly ok. (If i had a GPU farm i would have tested different model).  
 > By the way, it would have been interesting to look into and test this [fine-tuning of Gemma2](https://huggingface.co/BAAI/bge-multilingual-gemma2) done at Beijing University. They trained it to enhance its multilingual capabilities, and it reportedly achieves state-of-the-art results on major multilingual benchmarks.
 
 #### Model winner distribution
-<img src="./images/distribmodel.png" width="25%" height="25%">
+<img src="./images/distribmodel.png" width="50%" height="50%">
  
 Ok, chatgpt-o4 rox, we get it.
 
@@ -114,7 +114,7 @@ There is another [similar competition on Kaggle](https://www.kaggle.com/competit
 #### Swapping response A/B
 Because i didn't want my model to overfit too quicly, i created a second dataframe from the original simply by swapping A/B in the model. For single threaded trainning i swap between those 2 dataframes each epoch, and for multithreading i swap for each GPUs.
 ## Model
-Most of my code is in [ModelUtils.py]()
+Most of my code is in [ModelUtils.py](https://github.com/ohmatheus/Kaggle_WSDMCup_Multilingual_Chatbot_Arena/blob/main/Code/ModelsUtils.py)
 #### Architecture
 Code will be simpler to understand:
 ```python
@@ -191,7 +191,7 @@ optimizer = optim.AdamW([
 ], weight_decay=0.01)
 ```
 #### Prepare Model
-There is a [specific notebook]() to 'prepare' my model.
+There is a [specific notebook](https://github.com/ohmatheus/Kaggle_WSDMCup_Multilingual_Chatbot_Arena/blob/main/Code/2_Prepare_BaseModel.ipynb) to 'prepare' my model.
 Because the gemma2 part of my pytorch module is quantized and PEFTed but not the rest, i had to split the save/load and save the PEFT weights in a different folder than my classification weights :
 ```python
 #-------------------------------------------------------------------
@@ -261,7 +261,7 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
     return predictionModelLoaded
 ```
 ### MultiGPU trainning
-[Code here]()
+[Code here](https://github.com/ohmatheus/Kaggle_WSDMCup_Multilingual_Chatbot_Arena/blob/main/Code/3_2_MultiGPUTrainning_Script.py)
 ### RunPod
 For true trainning i used RunPod and multiple GPU (RTX 4090). RunPod creates a linux based environnment that i can access with the jupyter framework or connecting from my computer with a linux shell if i just wanna run scripts:
 <img src="./images/runpod2.png" width="50%" height="50%">
@@ -269,7 +269,7 @@ For true trainning i used RunPod and multiple GPU (RTX 4090). RunPod creates a l
 
 ## Config
 Lastly i wanted to talk about my configuration system, i wanted to have a text file, easy to read, easy to modify, with default values. So i created my config without json or anything that would have need to modify config value by code.  
-[Code here]()
+[Code here](https://github.com/ohmatheus/Kaggle_WSDMCup_Multilingual_Chatbot_Arena/blob/main/Code/Configurations.py)
 ### Config example
 ```python
 #--------------------------------------------------------------------------
@@ -331,10 +331,5 @@ dummy = config.any_configuration_present_in_file
 
 
 ## Conclusion
-I worked hard for this project, and my initial goal was to score in the first top 100 worldwide, goal reached. I learned so many things in that project on NLP, quantization, PEFT, multithreading, cloud based 
-
-
-
-
-
-[]()
+I worked hard for this project, and my initial goal was to score in the first top 100 worldwide, goal reached.  
+I learned so many things in that project on NLP, quantization, PEFT, multithreading, linux cloud based trainning, and more. Very happy to be able to present my work.
