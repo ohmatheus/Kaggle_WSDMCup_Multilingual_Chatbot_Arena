@@ -260,7 +260,7 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
     
     return predictionModelLoaded
 ```
-### MultiGPU trainning
+### MultiGPU trainning using pytorch's DistributedDataParallel
 [Code here](https://github.com/ohmatheus/Kaggle_WSDMCup_Multilingual_Chatbot_Arena/blob/main/Code/3_2_MultiGPUTrainning_Script.py)
 ### RunPod
 For true trainning i used RunPod and multiple GPU (RTX 4090). RunPod creates a linux based environnment that i can access with the jupyter framework or connecting from my computer with a linux shell if i just wanna run scripts:
