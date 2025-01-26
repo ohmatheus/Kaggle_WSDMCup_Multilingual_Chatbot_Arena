@@ -35,6 +35,7 @@ fp16 = True
 feature_dims = 63
 num_classes = 1
 hidden_dim=128
+compute_feats=True
 #--- lora part ----
 prepare_kbit_training=True # at load
 lora_r = 16
@@ -58,14 +59,38 @@ fp16 = True
 train_batch = 2
 eval_batch = 2
 n_epochs = 5
-sample_size = 0.002
-base_model_lr = 1e-5
+sample_size = 0.001
+base_model_lr = 1e-4
 feature_fc_lr = 5e-4
 classifier_lr = 5e-4
-max_length=256
+max_length=1024
+spread_max_length = False
+hidden_dim=512
+
+#--------------------------------------------------------------------------
+# Just to make sure everything run smoothly - ultra speed test config
+[micro_nofeats]
+train_data = '../Data/Preprocessed/train_preprocessed_FULL_custom.csv'
+#train_data = '../Data/Preprocessed/train_preprocessed_FULL_EN.csv'
+#train_data = '../Data/Preprocessed/train_preprocessed_FULL_original.csv'
+config_name = 'micro_nofeats'
+transformers_basemodel_path = 'unsloth/gemma-2-2b'
+basemodel_path = '../BaseModel/gemma2_2b_unsloth_fp16_4bit'
+max_layers = 26
+quantize = '4bit'
+fp16 = True
+train_batch = 2
+eval_batch = 2
+n_epochs = 5
+sample_size = 0.001
+base_model_lr = 1e-4
+feature_fc_lr = 5e-4
+classifier_lr = 0
+max_length=512
 spread_max_length = False
 hidden_dim=10
 prepare_kbit_training=True
+compute_feats=False
 
 #--------------------------------------------------------------------------
 [runpod_1]
@@ -100,8 +125,8 @@ spread_max_length=False
 hidden_dim=4096
 
 #--------------------------------------------------------------------------
-[gemma2_9b_fp16_4bit_h1536]
-config_name = 'gemma2_9b_fp16_4bit_h1536'
+[gemma2_9b_fp16_4bit_h1024]
+config_name = 'gemma2_9b_fp16_4bit_h1024'
 train_data = '../Data/Preprocessed/train_preprocessed_FULL_custom.csv'
 transformers_basemodel_path = 'google/gemma-2-9b-it'
 basemodel_path='../BaseModel/gemma2_9b_fp16_4bit'
@@ -110,14 +135,14 @@ max_layers=42
 train_batch=4
 eval_batch=4
 fp16=True
-sample_size=0.01
-n_epochs=3
+sample_size=1
+n_epochs=6
 max_length=2048
 spread_max_length=False
-hidden_dim=1536
-base_model_lr=1e-5
-feature_fc_lr=5e-4
-classifier_lr=5e-4
+hidden_dim=1024
+base_model_lr=1e-4
+feature_fc_lr=1e-3
+classifier_lr=1e-3
 validation_size=0.09
 
 

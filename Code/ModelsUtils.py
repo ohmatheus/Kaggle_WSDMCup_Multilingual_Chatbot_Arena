@@ -166,25 +166,27 @@ def evaluate_model(model, dataloader, device="cuda"):
     correct = 0
     total_samples = 0
 
-    loss_fn = nn.BCELoss()
+    loss_fn = nn.BCEWithLogitsLoss()
 
     with torch.no_grad():
         for batch in tqdm(dataloader, total=len(dataloader), unit='row'):
 
-            logits = model(
-                input_ids=batch['input_ids'].to(device),
-                attention_mask=batch['attention_mask'].to(device),
-                features=batch['features'].to(device)
-            )
-
             labels = batch['label'].to(device)  # One-hot encoded labels
+            with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
+                logits = model(
+                    input_ids=batch['input_ids'].to(device),
+                    attention_mask=batch['attention_mask'].to(device),
+                    features=batch['features'].to(device)
+                )
+                loss = loss_fn(logits, labels)
 
             # Compute loss
-            loss = loss_fn(logits, labels)
             total_loss += loss.item()
 
+            probabilities = torch.sigmoid(logits)
+            
             # Compute predictions and accuracy
-            normLogits = (logits>0.5).float()
+            normLogits = (probabilities>0.5).float()
             predictions = normLogits    #torch.argmax(logits, dim=1)  # Class with highest score
             true_labels = labels        #torch.argmax(labels, dim=1)  # Convert one-hot to class indices
             
@@ -214,11 +216,14 @@ def train_model(model, dataloader, dataloader_train_swap, valid_dataloader, opti
     history["best_loss"]=0
     history["best_acc"]=0
 
-    loss_fn = nn.BCELoss()
+    loss_fn = nn.BCEWithLogitsLoss()
 
     now = datetime.now()
     date_time = now.strftime("%m-%d-%Y_%H-%M")
     checkpoint_prefix = date_time+'_'+str(config.max_length)+'_'
+    
+    # Creates a GradScaler once at the beginning of training.
+    scaler = torch.amp.GradScaler()
 
     for epoch in range(config.n_epochs):
         total_loss = 0
@@ -231,29 +236,45 @@ def train_model(model, dataloader, dataloader_train_swap, valid_dataloader, opti
         else:
             current_loader = dataloader_train_swap
         
+        #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        #current_loader = dataloader
+        
         for batch in tqdm(current_loader, total=len(current_loader), unit='row'):
             optimizer.zero_grad()
             
-            logits = model(
-                input_ids=batch['input_ids'].to(device),
-                attention_mask=batch['attention_mask'].to(device),
-                features=batch['features'].to(device)
-            )
-            
-            # One-hot labels
             labels = batch['label'].to(device)
+            with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
+                logits = model(
+                    input_ids=batch['input_ids'].to(device),
+                    attention_mask=batch['attention_mask'].to(device),
+                    features=batch['features'].to(device)
+                )
+                loss = loss_fn(logits, labels)
         
-            loss = loss_fn(logits, labels)
-        
-            loss.backward()
-            optimizer.step()
+            # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
+            # Backward passes under autocast are not recommended.
+            # Backward ops run in the same dtype autocast chose for corresponding forward ops.
+            scaler.scale(loss).backward()
+            #loss.backward()
+            
+            # scaler.step() first unscales the gradients of the optimizer's assigned params.
+            # If these gradients do not contain infs or NaNs, optimizer.step() is then called,
+            # otherwise, optimizer.step() is skipped.
+            scaler.step(optimizer)
+            #optimizer.step()
+            
             if scheduler is not None:
                 scheduler.step()
             
+            # Updates the scale for next iteration.
+            scaler.update()
+            
             total_loss += loss.item()
             
+            probabilities = torch.sigmoid(logits)
+            
             # Compute predictions and accuracy
-            normLogits = (logits>0.5).float()
+            normLogits = (probabilities>0.5).float()
             predictions = normLogits    #torch.argmax(logits, dim=1)  # Class with highest score
             true_labels = labels        #torch.argmax(labels, dim=1)  # Convert one-hot to class indices
             
@@ -279,7 +300,8 @@ def train_model(model, dataloader, dataloader_train_swap, valid_dataloader, opti
         
         chkptName = checkpoint_prefix + 'train'
         
-        if min_val_loss > metrics['loss']:
+        #if min_val_loss > metrics['loss']:
+        if True:
             print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint_lossBest, epoch: ", epoch + 1)
             custom_save_model_chkpt(model, config, checkpointName=chkptName+"_lossBest", epoch=epoch+1)
             history["best_epoch"] = epoch + 1
@@ -301,31 +323,34 @@ def train_model(model, dataloader, dataloader_train_swap, valid_dataloader, opti
 
 
 #-------------------------------------------------------------------
-def last_token_pool(last_hidden_states: Tensor,
-                    attention_mask: Tensor) -> Tensor:
-    left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
-    if left_padding:
-        return last_hidden_states[:, -1]
-    else:
-        sequence_lengths = attention_mask.sum(dim=1) - 1
-        batch_size = last_hidden_states.shape[0]
-        return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
+#def last_token_pool(last_hidden_states: Tensor,
+#                    attention_mask: Tensor) -> Tensor:
+#    left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+#    if left_padding:
+#        return last_hidden_states[:, -1]
+#    else:
+#        sequence_lengths = attention_mask.sum(dim=1) - 1
+#        batch_size = last_hidden_states.shape[0]
+#        return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
 
-# #-------------------------------------------------------------------
-# def last_token_pool(hidden_states, attention_mask):
-#     # Use the mean of non-masked tokens for pooling (faster on GPU)
-#     mask = attention_mask.unsqueeze(-1).float()
-#     pooled = torch.sum(hidden_states * mask, dim=1) / torch.sum(mask, dim=1)
-#     return pooled
+#-------------------------------------------------------------------
+def last_token_pool(hidden_states, attention_mask):
+    # Use the mean of non-masked tokens for pooling (faster on GPU)
+    mask = attention_mask.unsqueeze(-1).float()
+    pooled = torch.sum(hidden_states * mask, dim=1) / torch.sum(mask, dim=1)
+    return pooled
 
 #-------------------------------------------------------------------
 class PreferencePredictionModel(nn.Module):
-    def __init__(self, gemma_model, feature_dim, hidden_dim=128, num_classes=2):
+    def __init__(self, gemma_model, feature_dim, hidden_dim=128, num_classes=2, compute_feats=True):
         super(PreferencePredictionModel, self).__init__()
         
         # Load transformer model
         self.gemma_model = gemma_model
         transformer_hidden_size = gemma_model.config.hidden_size
+        self.compute_feats = compute_feats
+        
+        sub_hidden_dim = int(hidden_dim/2)
         
         # Fully connected layers for features
         self.feature_fc = nn.Linear(feature_dim, 128)
@@ -334,14 +359,27 @@ class PreferencePredictionModel(nn.Module):
         if self.feature_fc.bias is not None:
             init.zeros_(self.feature_fc.bias)
         
-        # Final classification layer
-        self.classifier = nn.Sequential(
-            nn.Linear(transformer_hidden_size + 128, hidden_dim), #embedding + features
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_dim, num_classes),
-            nn.Sigmoid()
-        )
+        if self.compute_feats:
+            # Final classification layer
+            self.classifier = nn.Sequential(
+                nn.Linear(transformer_hidden_size + 128, hidden_dim), #embedding + features
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(hidden_dim, sub_hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(sub_hidden_dim, num_classes),
+            )
+        else:
+            self.classifier = nn.Sequential(
+                nn.Linear(transformer_hidden_size, hidden_dim), #embedding + features
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(hidden_dim, sub_hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(sub_hidden_dim, num_classes),
+            )
     
     def forward(self, input_ids, attention_mask, features):
         outputs = self.gemma_model(input_ids=input_ids, attention_mask=attention_mask) #, output_hidden_states=True
@@ -354,9 +392,13 @@ class PreferencePredictionModel(nn.Module):
         feature_output = self.feature_fc(features)
         feature_output = F.normalize(feature_output, p=2, dim=1)
         
-        # Concatenate and classify
-        combined = torch.cat((embeddings, feature_output), dim=1)
-        #combined = embeddings
+        combined = 0
+        if self.compute_feats:
+            # Concatenate and classify
+            combined = torch.cat((embeddings, feature_output), dim=1)
+        else:
+            combined = embeddings
+        
         logits = self.classifier(combined)
         
         return logits
@@ -378,7 +420,7 @@ def custom_save_model_chkpt(model, config, checkpointName, epoch=0, optimizer=No
         }, f'{savePath}/PreferencePredictionModel.pt')
 
 #-------------------------------------------------------------------
-def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu", is_trainable=True):
+def custom_load_model_chkpt(config, checkpointName, device, loadFrom=None, is_trainable=True):
     # load base
     quantization_config = None
     if config.quantize=='4bit': #should not be use as this is choosed when preparing model see 'Prepare_BaseModel' notebook
@@ -406,6 +448,7 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
         peftModelPath=f"{config.checkpoints_path}/{config.config_name}/"
     
     loadPath = peftModelPath + checkpointName
+    #loadPath_temp = peftModelPath + 'Original_notrain'
     
     # load peft from base
     loraModel_load = PeftModel.from_pretrained(
@@ -413,14 +456,17 @@ def custom_load_model_chkpt(config, checkpointName, loadFrom=None, device="cpu",
             f'{loadPath}/PEFT',
             is_trainable=is_trainable)
     
+    #loraModel_load.load_adapter(f'{loadPath}/PEFT', adapter_name='default', device_map=device)
+    
     predictionModelLoaded = PreferencePredictionModel(
             loraModel_load,
             feature_dim=config.feature_dims,
             num_classes=config.num_classes,
-            hidden_dim=config.hidden_dim
-            )
+            hidden_dim=config.hidden_dim,
+            compute_feats=config.compute_feats)
     
     checkpoint = torch.load(f'{loadPath}/PreferencePredictionModel.pt', weights_only=True)
+    #checkpoint_temp = torch.load(f'{loadPath_temp}/PreferencePredictionModel.pt', weights_only=True)
     
     predictionModelLoaded.feature_fc.load_state_dict(checkpoint['feature_fc_state_dict'])
     predictionModelLoaded.classifier.load_state_dict(checkpoint['classifier_state_dict'])
@@ -434,7 +480,7 @@ class ChatbotArenaDataset(Dataset):
         self.data = dataframe
         self.tokenizer = tokenizer
         self.max_length = max_length
-        self.num_classes = 2
+        self.num_classes = 1
         self.test = test
 
     def __len__(self):
@@ -468,7 +514,6 @@ class ChatbotArenaDataset(Dataset):
 
         if not self.test:
             # Label
-            #label = torch.nn.functional.one_hot(torch.tensor(row['class_label']), num_classes=self.num_classes).float()
             #label = torch.nn.functional.one_hot(torch.tensor(row['class_label']), num_classes=1).float()
             label = torch.tensor([row['class_label']]).float()
 

@@ -236,14 +236,14 @@ def DDP_train(rank, world_size, train_data, train_data_swap, valid_data, config,
 
             if min_val_loss > metrics['loss']:
                 print(f"{metrics['loss']} val loss is better than previous {min_val_loss}, saving checkpoint_lossBest, epoch: ", epoch + 1)
-                Utils.custom_save_model_chkpt(model, config, checkpointName=chkptName+"_lossBest", epoch=epoch+1)
+                Utils.custom_save_model_chkpt(ddp_model.module, config, checkpointName=chkptName+"_lossBest", epoch=epoch+1)
                 history["best_epoch"] = epoch + 1
                 history["best_loss"] = metrics['loss']
                 min_val_loss = metrics['loss']
 
             if min_acc < metrics['accuracy']:
                 print(f"{metrics['accuracy']} val accuracy is better than previous {min_acc}, saving checkpoint_accBest, epoch: ", epoch + 1)
-                Utils.custom_save_model_chkpt(model, config, checkpointName=chkptName+"_accBest", epoch=epoch+1)
+                Utils.custom_save_model_chkpt(ddp_model.module, config, checkpointName=chkptName+"_accBest", epoch=epoch+1)
                 history["best_epoch"] = epoch + 1
                 history["best_acc"] = metrics['accuracy']
                 min_acc = metrics['accuracy']
